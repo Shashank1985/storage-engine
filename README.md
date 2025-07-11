@@ -3,7 +3,7 @@
 ## What and How?
 Simple LSM-tree based implementation of a key value store in python. Implemented this after reading chapter 3 of Designing Data Intensive Applications where the author talks about different data structures powering our database, one such data structure was the LSMtree. 
 This projects implements a:
-1. Write Ahead Log (For atomicity and preventing losing information from crashes)
+1. Write Ahead Log (For atomicity and durability)
 2. In memory memtable (Where writes initially go to)
 3. SSTables (sorted string tables) where items are sorted based on keys.
 
