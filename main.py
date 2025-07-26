@@ -18,8 +18,6 @@ def print_cli_help():
     print()
 
 def run_cli():
-    # Initialize the storage manager. Data will be stored in a 'data' subdirectory 
-    # relative to where main.py is run, unless an absolute path is given to StorageManager.
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
     manager = StorageManager(base_data_path=data_dir)
     
@@ -139,9 +137,7 @@ def run_cli():
         except Exception as e:
             # Catch-all for unexpected errors during command processing
             print(f"An unexpected error occurred: {e}")
-            # For debugging, you might want to print the full traceback:
-            # import traceback
-            # traceback.print_exc()
+            
 
     manager.close_all()
     print("Application shut down gracefully.")
