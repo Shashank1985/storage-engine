@@ -1,0 +1,35 @@
+# pyproject.toml
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lsm-storage-engine-key-value-store" 
+version = "0.1.2"
+authors = [
+  { name="Shashank", email="shashankshashidhar73@gmail.com" },
+]
+description = "A persistent key-value storage engine based on LSM-tree architecture."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Database",
+    "Topic :: System :: Filesystems",
+    "Environment :: Console",
+]
+
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Shashank1985/storage-engine"
+Issues = "https://github.com/Shashank1985/storage-engine/issues"
+
+# This section creates the command-line tool.
+[project.scripts]
+lsm-cli = "lsm_storage_engine.cli:main"

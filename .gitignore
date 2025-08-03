@@ -20,3 +20,7 @@ data/
 .idea/
 *.DS_Store
 Thumbs.db
+
+dist/
+build/
+*.egg-info/

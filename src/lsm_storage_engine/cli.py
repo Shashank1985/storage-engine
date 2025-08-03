@@ -1,7 +1,7 @@
 # simple_storage_engine/main.py
 import os
 import json 
-from engine.storage_manager import StorageManager
+from .storage_manager import StorageManager
 
 def print_cli_help():
     print("\nSimple Storage Engine CLI - Available Commands:")
@@ -17,13 +17,11 @@ def print_cli_help():
     print("  EXIT                           - Exit the application.")
     print()
 
-def run_cli():
-    # Initialize the storage manager. Data will be stored in a 'data' subdirectory 
-    # relative to where main.py is run, unless an absolute path is given to StorageManager.
-    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+def main():
+    data_dir = os.path.join(os.getcwd(), "data")
     manager = StorageManager(base_data_path=data_dir)
     
-    print("Welcome to Simple Storage Engine CLI!")
+    print("Welcome to LSM Storage Engine CLI!")
     print(f"Data will be stored in: {manager.base_data_path}")
     print_cli_help()
 
@@ -137,15 +135,8 @@ def run_cli():
                     print(f"Unknown command: '{command}'. Type 'HELP' for available commands.")
         
         except Exception as e:
-            # Catch-all for unexpected errors during command processing
             print(f"An unexpected error occurred: {e}")
-            # For debugging, you might want to print the full traceback:
-            # import traceback
-            # traceback.print_exc()
+            
 
     manager.close_all()
     print("Application shut down gracefully.")
-
-
-if __name__ == "__main__":
-    run_cli()
