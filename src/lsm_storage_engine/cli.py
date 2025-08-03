@@ -17,13 +17,8 @@ def print_cli_help():
     print("  EXIT                           - Exit the application.")
     print()
 
-<<<<<<< HEAD:src/lsm_storage_engine/cli.py
 def main():
     data_dir = os.path.join(os.getcwd(), "data")
-=======
-def run_cli():
-    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
->>>>>>> ebcd82836ed2ddce9cadd3478018d028b979a606:main.py
     manager = StorageManager(base_data_path=data_dir)
     
     print("Welcome to LSM Storage Engine CLI!")
@@ -145,10 +140,3 @@ def run_cli():
 
     manager.close_all()
     print("Application shut down gracefully.")
-<<<<<<< HEAD:src/lsm_storage_engine/cli.py
-=======
-
-
-if __name__ == "__main__":
-    run_cli()
->>>>>>> ebcd82836ed2ddce9cadd3478018d028b979a606:main.py
