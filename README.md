@@ -20,5 +20,3 @@ This project supports basic key-value operations like GET, PUT, DELETE, EXISTS, 
 The writes are first pushed to the Sorted Container in the memtable (which is in memory). Once the memtable reaches a threshold size, it is flushed into a persistent SSTable, every write is recorded in the WAL as it comes, for atomicity and crash recovery. 
 
 The reading process is a bit more complicated. LSMTrees are more optimized for write workloads. When the SSTable gets created, there is an index file also created which stores keys in gaps of 10 (eg: 1st item, 10th item, 20th item etc..). This was implemented for range queries. A read request is first sent to the index file to find which range it lies in and then moves to the different SSTables. Reading is not a very easy process in LSMTrees as compared to B-Trees, which are optimized for read workloads.
-ork as per prompts on the CLI
->>>>>>> ebcd82836ed2ddce9cadd3478018d028b979a606
