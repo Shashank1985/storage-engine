@@ -1,7 +1,8 @@
 # simple_storage_engine/main.py
 import os
 import json 
-from .storage_manager import StorageManager
+from .storage_manager import StorageManager, CollectionExistsError, CollectionNotFoundError, StorageError
+
 
 def print_cli_help():
     print("\nSimple Storage Engine CLI - Available Commands:")
@@ -89,17 +90,16 @@ def main():
             else:
                 active_store = manager.get_active_collection()
                 if not active_store:
-                    # get_active_collection already prints a message
-                    continue
-                print(f"DEBUG_MAIN_PY: Before calling put on active_store. Type: {type(active_store)}. ID: {id(active_store)}")
-                if hasattr(active_store, 'wal'):
-                    print(f"DEBUG_MAIN_PY: active_store.wal is None: {active_store.wal is None}")
-                else:
-                    print("DEBUG_MAIN_PY: active_store has no 'wal' attribute")
-                if hasattr(active_store, 'memtable'):
-                    print(f"DEBUG_MAIN_PY: active_store.memtable is None: {active_store.memtable is None}")
-                else:
-                    print("DEBUG_MAIN_PY: active_store has no 'memtable' attribute")
+                    raise CollectionNotFoundError("No active collection. Use 'USE <name>' command.")
+                # print(f"DEBUG_MAIN_PY: Before calling put on active_store. Type: {type(active_store)}. ID: {id(active_store)}")
+                # if hasattr(active_store, 'wal'):
+                #     print(f"DEBUG_MAIN_PY: active_store.wal is None: {active_store.wal is None}")
+                # else:
+                #     print("DEBUG_MAIN_PY: active_store has no 'wal' attribute")
+                # if hasattr(active_store, 'memtable'):
+                #     print(f"DEBUG_MAIN_PY: active_store.memtable is None: {active_store.memtable is None}")
+                # else:
+                #     print("DEBUG_MAIN_PY: active_store has no 'memtable' attribute")
                 if command == "PUT":
                     if len(args) < 2:
                         print("Usage: PUT <key> <value>")
@@ -133,10 +133,10 @@ def main():
                         print("False")
                 else:
                     print(f"Unknown command: '{command}'. Type 'HELP' for available commands.")
-        
+        except (CollectionExistsError, CollectionNotFoundError, StorageError, ValueError) as e:
+            print(f"Error: {e}")
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
             
 
     manager.close_all()
-    print("Application shut down gracefully.")

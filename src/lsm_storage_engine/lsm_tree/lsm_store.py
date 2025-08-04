@@ -55,10 +55,7 @@ class LSMTreeStore(AbstractKVStore):
                 json.dump({"levels": self.levels}, f, indent=2)
             return True
         except IOError as e:
-            print(f"CRITICAL: Error writing MANIFEST file {self.manifest_path}: {e}")
-            # This is a severe error. The on-disk state might become inconsistent with in-memory.
-            # Consider how to handle this (e.g., attempt to revert in-memory state, enter read-only mode).
-            return False
+            raise IOError(f"CRITICAL: Error writing MANIFEST file {self.manifest_path}: {e}")
 
     def _load_manifest(self) -> bool:
         if os.path.exists(self.manifest_path):
