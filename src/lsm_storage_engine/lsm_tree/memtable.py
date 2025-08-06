@@ -29,11 +29,9 @@ class Memtable:
             old_size += len(key.encode('utf-8'))
             if old_val is not TOMBSTONE and old_val is not None: # Check if it's not tombstone before encoding
                  old_size += len(str(old_val).encode('utf-8')) # Assuming value is string-like
-            elif old_val is TOMBSTONE:
-                old_size += 0 # Tombstones are small, approx 0 for value part
+            
         
         self._data[key] = value
-        print(f"DEBUG_MEMTABLE_PUT: Storing in memtable: key='{key}', value='{value}' (type: {type(value)}), is_tombstone: {value is TOMBSTONE}")
         new_size = len(key.encode('utf-8'))
         if value is not TOMBSTONE and value is not None:
             new_size += len(str(value).encode('utf-8'))
