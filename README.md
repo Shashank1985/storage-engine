@@ -71,7 +71,7 @@ This will print the cli help with all the functions, follow the instructions as 
 
 
 # Update history:
-6th Aug 2025, version 0.3.1: Update Notes: Cleaned up debug and other print statements and logs for public release
+6th Aug 2025, version 0.4.0: Update Notes: Cleaned up debug and other print statements and logs for public release
 
 ## Contribution
 Contributions, issues and feature requests are welcome!
