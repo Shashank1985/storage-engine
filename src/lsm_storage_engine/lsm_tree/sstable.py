@@ -59,7 +59,7 @@ class SSTableManager:
                 with open(index_path, 'w', encoding='utf-8') as index_f:
                     json.dump(sparse_index_entries, index_f)
             
-            
+            return True
         except IOError as e:
             if os.path.exists(data_path): os.remove(data_path)
             if os.path.exists(index_path): os.remove(index_path)
