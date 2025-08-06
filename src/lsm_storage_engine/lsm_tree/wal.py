@@ -8,7 +8,6 @@ It is a simple append-only log, where each line is a JSON object representing an
 import os
 import json
 
-# A unique object to represent a deleted value (tombstone)
 TOMBSTONE = "__TOMBSTONE__"
 
 class WriteAheadLog:
@@ -17,13 +16,11 @@ class WriteAheadLog:
         self._file = None
         
         # Open in append mode, create if not exists.
-        # The file handle will be kept open for performance.
+        # The file handle has to be open.
         try:
             self._file = open(self.wal_path, 'a', encoding='utf-8')
         except IOError as e:
-            # Handle error appropriately in a real system (e.g., raise custom exception)
-            print(f"Error opening WAL file {self.wal_path}: {e}")
-            raise
+            raise IOError("Error opening the Write Ahead Log")
 
     def log_operation(self, operation_type: str, key: str, value=None) -> bool:
         """
@@ -33,24 +30,16 @@ class WriteAheadLog:
         """
         log_entry = {"op": operation_type, "key": key}
         if operation_type == "PUT":
-            if value is TOMBSTONE: # Should not happen if API is used correctly
-                print("Warning: Attempting to PUT a TOMBSTONE directly via log_operation. This is unusual.")
             log_entry["value"] = value
-        elif operation_type == "DELETE":
-            pass # No value needed for delete, implies tombstone
-        else:
-            print(f"Error: Unknown operation type '{operation_type}' for WAL.")
-            return False
-
+        elif operation_type != "DELETE":
+            raise ValueError(f"Unknown operation type '{operation_type}' for WAL.")
+       
         try:
             json_entry = json.dumps(log_entry)
             self._file.write(json_entry + '\n')
             self._file.flush()  # Ensure it's written to disk immediately for persistence
-            return True
         except (IOError, TypeError) as e:
-            print(f"Error writing to WAL {self.wal_path}: {e}")
-            # In a real system, you might try to re-open the file or enter a read-only/error state.
-            return False
+            raise IOError(f"Error writing to WAL {self.wal_path}: {e}")
 
     def replay(self) -> list[dict]:
         """
@@ -76,22 +65,21 @@ class WriteAheadLog:
                             entry = json.loads(line)
                             entries.append(entry)
                         except json.JSONDecodeError as e:
-                            print(f"Warning: Corrupt WAL entry skipped in {self.wal_path}: '{line[:50]}...' - Error: {e}")
-                            # Decide how to handle corruption: stop, skip, log
+                            continue
         except IOError as e:
-            print(f"Error reading WAL file {self.wal_path} during replay: {e}")
+            raise IOError(f"Error reading WAL file {self.wal_path} during replay: {e}")
         finally:
-            # Reopen in append mode
-            try:
-                self._file = open(self.wal_path, 'a', encoding='utf-8')
-                if current_pos and self._file: # Seek back if needed (though not typical for simple WAL replay)
-                    pass # self._file.seek(current_pos) - usually not needed for append after full read
-            except IOError as e:
-                print(f"Error re-opening WAL file {self.wal_path} in append mode after replay: {e}")
-                # Critical error, the WAL might be unusable for future writes
+            self._reopen_for_append()
                 
         return entries
 
+    def _reopen_for_append(self):
+        # Reopen in append mode
+            try:
+                self._file = open(self.wal_path, 'a', encoding='utf-8')
+            except IOError as e:
+                raise IOError(f"Critical Error: Failed to reopen WAL {self.wal_path} for appending: {e}")
+            
     def truncate(self):
         """
         Clears the WAL file. Called after a memtable flush to SSTable is successful.
@@ -102,17 +90,9 @@ class WriteAheadLog:
             # Open in write mode to truncate, then immediately reopen in append mode
             with open(self.wal_path, 'w', encoding='utf-8') as f:
                 pass # Opening in 'w' mode truncates the file
-            self._file = open(self.wal_path, 'a', encoding='utf-8')
-            print(f"WAL {self.wal_path} truncated.")
+            self._reopen_for_append()
         except IOError as e:
-            print(f"Error truncating WAL file {self.wal_path}: {e}")
-            # This is a problem, as old operations might be replayed incorrectly.
-            # Try to reopen in append mode anyway if truncation fails but file exists.
-            if os.path.exists(self.wal_path) and (not self._file or self._file.closed):
-                 try:
-                    self._file = open(self.wal_path, 'a', encoding='utf-8')
-                 except IOError as e_reopen:
-                     print(f"Critical Error: Failed to reopen WAL {self.wal_path} after truncation attempt: {e_reopen}")
+            raise IOError(f"Error truncating WAL file {self.wal_path}: {e}")
 
 
     def close(self):
@@ -120,10 +100,11 @@ class WriteAheadLog:
             try:
                 self._file.flush() # Final flush
                 self._file.close()
-                print(f"WAL {self.wal_path} closed.")
+                
             except IOError as e:
-                print(f"Error closing WAL file {self.wal_path}: {e}")
+                raise IOError(f"Error closing WAL file {self.wal_path}: {e}")
         self._file = None
 
     def __del__(self):
-        self.close()
+        if self._file and not self._file.closed:
+            self.close()
