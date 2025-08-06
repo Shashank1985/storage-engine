@@ -70,6 +70,9 @@ This will print the cli help with all the functions, follow the instructions as 
 4. Ctrl + C or EXIT to terminate the program.
 
 
+# Update history:
+6th Aug 2025, version 0.3.1: Update Notes: Cleaned up debug and other print statements and logs for public release
+
 ## Contribution
 Contributions, issues and feature requests are welcome!
 

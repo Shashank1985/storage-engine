@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lsm-storage-engine-key-value-store" 
-version = "0.3.0"
+version = "0.3.1"
 authors = [
   { name="Shashank", email="shashankshashidhar73@gmail.com" },
 ]
@@ -24,7 +24,7 @@ classifiers = [
     "Environment :: Console",
 ]
 
-dependencies = []
+dependencies = ["sortedcontainers"]
 
 [project.urls]
 Homepage = "https://github.com/Shashank1985/storage-engine"
