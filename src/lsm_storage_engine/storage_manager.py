@@ -141,7 +141,22 @@ class StorageManager:
                     found_collections.append((item_name, "error_reading_meta"))
         return found_collections
 
+    def close_collection(self, name: str) -> bool:
+        """
+        Closes and unloads a specific collection.
+        """
+        if name not in self.collections:
+            raise CollectionNotFoundError(f"Collection '{name}' is not currently loaded.")
 
+        try:
+            self.collections[name].close()
+            del self.collections[name]
+            if self.active_collection_name == name:
+                self.active_collection_name = None
+            return True
+        except Exception as e:
+            raise StorageError(f"Error closing collection '{name}': {e}")
+        
     def close_all(self) -> None:
         for name, collection_instance in self.collections.items():
             collection_instance.close()

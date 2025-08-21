@@ -34,8 +34,10 @@ try:
     else:
         print("Error: Could not get the active collection store.")
 
+    #storage.close_collection("products") use this line if you want to close active collection and switch to different one
 except Exception as e:
     print(f"An unexpected error occurred: {e}")
+
 finally:
     # Close all file handles gracefully
     if storage:

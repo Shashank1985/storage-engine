@@ -73,6 +73,8 @@ This will print the cli help with all the functions, follow the instructions as 
 # Update history:
 6th Aug 2025, version 0.4.1: Update Notes: Cleaned up debug and other print statements and logs for public release
 
+21 Aug 2025, version 0.4.2: Added a close command to close the active collection and use a new one, if by accident user opens some collection they didnt mean to.
+
 ## Contribution
 Contributions, issues and feature requests are welcome!
 

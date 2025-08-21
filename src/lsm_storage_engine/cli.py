@@ -10,6 +10,7 @@ def print_cli_help():
     print("  USE <name>                     - Switch to an existing collection to make it active.")
     print("  LIST                           - List all available collections on disk.")
     print("  ACTIVE                         - Show the currently active collection.")
+    print("  CLOSE <name>                   - Close and unload active collection from memory.")
     print("  PUT <key> <value>              - Store key-value in the active collection.")
     print("  GET <key>                      - Retrieve value by key from active collection.")
     print("  DELETE <key>                   - Delete key-value from active collection.")
@@ -85,6 +86,12 @@ def main():
                     print(f"Currently active collection: {manager.active_collection_name}")
                 else:
                     print("No collection is currently active. Use 'USE <name>'.")
+            elif command == "CLOSE":
+                if not args or len(args) < 1:
+                    print("Usage: CLOSE <name>")
+                coll_name = args[0]
+                manager.close_collection(coll_name)
+                print(f"Collection '{coll_name}' has been successfully closed.")
 
             # Commands requiring an active collection
             else:
