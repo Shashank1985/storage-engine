@@ -60,7 +60,12 @@ finally:
 # Usage as CLI:
 Released initially, still supported
 
-run the command lsm-cli.
+run the command 
+
+```
+lsm-cli
+```
+
 This will print the cli help with all the functions, follow the instructions as per the cli help.
 
 # General rules:
@@ -75,6 +80,14 @@ This will print the cli help with all the functions, follow the instructions as 
 
 21 Aug 2025, version 0.4.2: Added a close command to close the active collection and use a new one, if by accident user opens some collection they didnt mean to.
 
+2 Oct 2025, version 1.0.0: Lay off merging and compaction to background worker thread so that incoming write requests to the single thread are not blocked. Provides leveled compaction. The fundamental change is moving from a Simple, Synchronous, Write-Optimized model to a Hybrid, Asynchronous, Read-Optimized model.
+The main issue with the previous model is that, in a write heavy process, the single threaded model would get blocked instantly because the main thread had to perform the compaction, which will increase latency, therefore defeating the point. Another problem was read amplification, where to search for a key will lead to searching in the memtable, then 4 different L0 SStables.
+
+New system-> 
+1. The _flush_memtable() now only writes the new SSTable and then sends a task signal ("FLUSH_COMPLETE") to a separate, permanent thread (_compaction_worker_run). This gives the asynchronous abilities
+
+2. Essentially, we are ensuring that in a certain level Li, the sstables are strictly non overlapping, so to search for a key, we can do less number of I/O operations because we can see the key ranges of each sstable (stored in the new .meta file) and we can use that info to find the file where our key is stored.
+For merging, we find one sstable from level Li and then use the key range information from .meta file to find which sstables from level Li+1 and then overlap only those sstables where there is an overlap and dont worry about the other sstables.
 ## Contribution
 Contributions, issues and feature requests are welcome!
 
