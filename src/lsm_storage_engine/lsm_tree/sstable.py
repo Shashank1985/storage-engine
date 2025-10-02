@@ -27,14 +27,15 @@ class SSTableManager:
         base_path = os.path.join(self.sstables_dir, sstable_id)
         data_path = f"{base_path}.dat"  # Data file
         index_path = f"{base_path}.idx" # Index file
-        return data_path, index_path
+        meta_path = f"{base_path}.meta" #metadata file to hold min_key and max_key
+        return data_path, index_path,meta_path
 
     def write_sstable(self, sstable_id: str, sorted_items: list[tuple[str, any]]) -> bool:
         """
         Writes a list of sorted key-value items to a new SSTable and its sparse index.
         `sorted_items` is a list of (key, value) tuples, where value can be TOMBSTONE_VALUE.
         """
-        data_path, index_path = self._get_sstable_paths(sstable_id)
+        data_path, index_path,meta_path = self._get_sstable_paths(sstable_id)
         sparse_index_entries = []
         current_offset = 0
         entry_count = 0
@@ -59,10 +60,18 @@ class SSTableManager:
                 with open(index_path, 'w', encoding='utf-8') as index_f:
                     json.dump(sparse_index_entries, index_f)
             
-            return True
+            if entry_count > 0:
+                min_key = sorted_items[0][0]
+                max_key = sorted_items[-1][0]
+                meta_data = {"min_key": min_key, "max_key": max_key}
+                with open(meta_path, 'w', encoding='utf-8') as meta_f:
+                    json.dump(meta_data, meta_f)
+                return True
+            return False
         except IOError as e:
             if os.path.exists(data_path): os.remove(data_path)
             if os.path.exists(index_path): os.remove(index_path)
+            if os.path.exists(meta_path): os.remove(meta_path)
             raise IOError(f"Error writing SSTable {sstable_id}: {e}")
 
     def find_in_sstable(self, sstable_id: str, target_key: str) -> tuple[any, bool]:
@@ -132,6 +141,19 @@ class SSTableManager:
                 ids.add(filename[:-4]) # Remove .dat
         return sorted(list(ids)) #(oldest to newest)
 
+    def get_sstable_key_range(self, sstable_id: str) -> tuple[str, str] | None:
+        """Retrieves the min and max key for an SSTable from its metadata file."""
+        _, _, meta_path = self._get_sstable_paths(sstable_id)
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, 'r', encoding='utf-8') as f:
+                    meta_data = json.load(f)
+                return meta_data["min_key"], meta_data["max_key"]
+            except (IOError, json.JSONDecodeError, KeyError) as e:
+                print(f"Warning: Could not read meta file for {sstable_id}: {e}")
+                return None
+        return None
+
     # --- Compaction Related (Basic merging k sorted lists) ---
     def compact_sstables(self, sstable_ids_to_compact: list[str], output_sstable_id: str) -> bool:
         heap = []
@@ -196,13 +218,16 @@ class SSTableManager:
             file_handle.close()
     def delete_sstable_files(self, sstable_id: str):
         """Deletes the .dat and .idx files for a given sstable_id."""
-        data_path, index_path = self._get_sstable_paths(sstable_id)
+        data_path, index_path,meta_path = self._get_sstable_paths(sstable_id)
         deleted_count = 0
         try:
             if os.path.exists(data_path):
                 os.remove(data_path)
                 deleted_count+=1
             if os.path.exists(index_path):
+                os.remove(index_path)
+                deleted_count+=1
+            if os.path.exists(meta_path):
                 os.remove(index_path)
                 deleted_count+=1
             
