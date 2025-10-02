@@ -2,11 +2,17 @@ import os
 import time
 import json
 import shutil 
+import threading
+import queue
 
 from ..abstract_kv_store import AbstractKVStore
 from .wal import WriteAheadLog, TOMBSTONE 
 from .memtable import Memtable 
 from .sstable import SSTableManager, TOMBSTONE_VALUE 
+
+class LSMCompactionError(RuntimeError):
+    """Raised for non-IO critical errors during LSM compaction flow."""
+    pass
 
 class LSMTreeStore(AbstractKVStore):
     MANIFEST_FILE = "MANIFEST"
@@ -15,6 +21,8 @@ class LSMTreeStore(AbstractKVStore):
     # Default Compaction Triggers
     DEFAULT_MEMTABLE_THRESHOLD_BYTES = 4 * 1024 * 1024 # 4MB
     DEFAULT_MAX_L0_SSTABLES = 4 # Trigger L0->L1 compaction
+    COMPACTION_RATIO_T = 10
+    LEVELED_CAPACITY_PROXY = 10
 
     def __init__(self, collection_path: str, options: dict = None):
         super().__init__(collection_path, options)
@@ -33,6 +41,10 @@ class LSMTreeStore(AbstractKVStore):
         
         self.levels: list[list[str]] = [] 
 
+        self._compaction_queue = queue.Queue()
+        self._compaction_stop_event = threading.Event()
+        self._compaction_thread: threading.Thread | None = None
+
         # Apply options
         current_options = options if options is not None else {}
         self.memtable_flush_threshold_bytes = current_options.get(
@@ -40,6 +52,9 @@ class LSMTreeStore(AbstractKVStore):
         )
         self.max_l0_sstables_before_compaction = current_options.get(
             "max_l0_sstables", self.DEFAULT_MAX_L0_SSTABLES
+        )
+        self.level_size_ratio = current_options.get(
+            "compaction_ratio", self.COMPACTION_RATIO_T
         )
         
         # load() will be called by StorageManager after instantiation.
@@ -89,6 +104,10 @@ class LSMTreeStore(AbstractKVStore):
                     self.memtable.put(key, value)
                 elif op_type == "DELETE":
                     self.memtable.delete(key) # Internally uses TOMBSTONE
+        
+        # start compaction thread
+        self._compaction_thread = threading.Thread(target=self._compaction_worker_run, daemon=True)
+        self._compaction_thread.start()
 
     def put(self, key: str, value: str) -> None:
         if self.wal is None or self.memtable is None:
@@ -142,8 +161,9 @@ class LSMTreeStore(AbstractKVStore):
             return
 
         sstable_id = self._generate_sstable_id()
-        sorted_items = self.memtable.get_sorted_items() # Returns list of (key, value_or_TOMBSTONE_objet)
-
+        sorted_items = sorted_items = [(k, v if v is not TOMBSTONE else TOMBSTONE_VALUE) 
+                        for k, v in self.memtable.get_sorted_items()]
+        
         if self.sstable_manager.write_sstable(sstable_id, sorted_items):
             # Add to L0 (Level 0). L0 is self.levels[0]
             if not self.levels: # First level (L0) doesn't exist
@@ -159,62 +179,148 @@ class LSMTreeStore(AbstractKVStore):
 
             self.memtable.clear()
             self.wal.truncate()
-            self._check_and_trigger_compaction()
+            if self._compaction_thread and self._compaction_thread.is_alive():
+                 self._compaction_queue.put(("FLUSH_COMPLETE", 0))
         else:
-            print(f"CRITICAL: Failed to write SSTable {sstable_id} during memtable flush. Data remains in memtable/WAL.")
-            # Do not clear memtable or truncate WAL if SSTable write fails.
+            raise IOError(f"CRITICAL: Failed to write SSTable {sstable_id} during memtable flush. Data remains in memtable/WAL.")
 
+    def _compaction_worker_run(self):
+        """Dedicated thread function for handling compaction tasks."""
+        while not self._compaction_stop_event.is_set():
+            try:
+                # Task is a tuple (task_type, source_level_idx)
+                task_type, level_idx = self._compaction_queue.get(timeout=1) 
+                
+                if task_type == "FLUSH_COMPLETE":
+                    # Flush completion triggers a check for all possible compactions
+                    self._check_and_trigger_compaction()
+                
+                self._compaction_queue.task_done()
+            except queue.Empty:
+                continue # Continue loop if queue is empty
+            except Exception as e:
+                # Log any unexpected errors in the compaction process
+                pass
 
     def _check_and_trigger_compaction(self):
+        """
+        Checks for and triggers the next required compaction task.
+        Called by the background compaction thread.
+        """
         if not self.levels or not self.levels[0]: # No L0 SSTables
             return
 
-        # Simple L0 to L1 compaction: if L0 has too many SSTables
+        # 1. Simple L0 to L1 compaction (Tiered Compaction)
+        # L0 is tiered and merges ALL into L1 when capacity is reached.
         if len(self.levels[0]) >= self.max_l0_sstables_before_compaction:
-            print(f"LSMTreeStore: L0 has {len(self.levels[0])} SSTables (threshold: {self.max_l0_sstables_before_compaction}). Triggering L0->L1 compaction.")
             self._compact_level(0) # Compact level 0
+            return # Run one major compaction at a time
+
+        # 2. L1+ to L(i+1) compaction (Leveled/Partial Compaction)
+        # Check all levels L1 and above for over-capacity (using file count proxy)
+        for level_idx in range(1, len(self.levels)):
+            if len(self.levels[level_idx]) > self.LEVELED_CAPACITY_PROXY:
+                self._compact_level(level_idx)
+                return # Run one major compaction and exit
 
 
     def _compact_level(self, level_idx: int):
         """
         Compacts SSTables within a given level or from this level to the next.
-        compacts all SSTables in level_idx to level_idx+1.
+        Uses Tiered compaction for L0->L1 and Leveled compaction for L1+->L2+.
         """
         if level_idx < 0 or level_idx >= len(self.levels) or not self.levels[level_idx]:
             return
 
-        sstables_to_compact = list(self.levels[level_idx]) # Make a copy
+        # Ensure target level exists
+        target_level_idx = level_idx + 1
+        if target_level_idx >= len(self.levels): # Ensure target level list exists
+            self.levels.extend([[] for _ in range(target_level_idx - len(self.levels) + 1)])
         
-        # Determine output SSTable ID and target level
-        # create one new SSTable in the next level.
-        output_sstable_id = self.sstable_manager._get_sstable_paths(self._generate_sstable_id() + f"_L{level_idx + 1}")[0].split(os.sep)[-1].replace('.dat','')
+        all_input_sstables_for_compaction: list[str] = []
+        output_sstable_id = self._generate_sstable_id() 
+        
+        # --- L0 -> L1 Compaction (Tiered/Full Merge) ---
+        if level_idx == 0:
+            all_input_sstables_for_compaction = list(self.levels[0])
 
-        # just merge sstables_to_compact.
-        all_input_sstables_for_compaction = sstables_to_compact
-        
-        if self.sstable_manager.compact_sstables(all_input_sstables_for_compaction, output_sstable_id):
-            # Update manifest:
-            self.levels[level_idx] = [] # Clear old SSTables from L0
-            target_level_idx = level_idx + 1
-            if target_level_idx >= len(self.levels): # Ensure target level list exists
-                self.levels.extend([[] for _ in range(target_level_idx - len(self.levels) + 1)])
+        # --- L1+ -> L2+ Compaction (Leveled/Partial Merge) ---
+        else: 
             
-            # Add the new SSTable to the target level.
+            # 1. Select the oldest/smallest SSTable from the source level (L(i))
+            sstable_to_compact = self.levels[level_idx][0] # Always choose the oldest/first file
+            
+            range_info = self.sstable_manager.get_sstable_key_range(sstable_to_compact)
+            if not range_info:
+                raise LSMCompactionError(f"CRITICAL: Failed to get key range for L{level_idx} sstable {sstable_to_compact}. Compaction aborted.")
+            
+            source_min_key, source_max_key = range_info
+
+            # Collect files for merging
+            sstables_to_merge = [sstable_to_compact]
+            target_sstables_to_remove = []
+            
+            # 2. Find ALL overlapping SSTables in the target level (L(i+1))
+            for target_id in list(self.levels[target_level_idx]): 
+                target_range_info = self.sstable_manager.get_sstable_key_range(target_id)
+                if not target_range_info:
+                    raise LSMCompactionError(f"CRITICAL: Missing range info for target sstable {target_id} in L{target_level_idx}. Data integrity issue.")
+                target_min, target_max = target_range_info
+                
+                # Check for key range overlap:
+                # Overlap occurs if (SourceMin <= TargetMax) AND (SourceMax >= TargetMin)
+                if source_min_key <= target_max and source_max_key >= target_min:
+                    sstables_to_merge.append(target_id)
+                    target_sstables_to_remove.append(target_id)
+
+            all_input_sstables_for_compaction = sstables_to_merge
+            
+        # --- Execute Merge, Update Manifest, and Cleanup (Common Logic) ---
+        if not all_input_sstables_for_compaction:
+            return
+
+        # Perform the actual k-way merge
+        if self.sstable_manager.compact_sstables(all_input_sstables_for_compaction, output_sstable_id):
+            
+            # 1. Remove old files from source level (L(i))
+            if level_idx == 0:
+                self.levels[level_idx] = [] # Clear ALL of L0 (Tiered)
+            else: # L1+ (Leveled)
+                self.levels[level_idx].remove(sstable_to_compact)
+                
+            # 2. Remove old files from target level (L(i+1))
+            if level_idx > 0: # Only applies to Leveled compactions
+                for target_id in target_sstables_to_remove:
+                    self.levels[target_level_idx].remove(target_id)
+            
+            # 3. Add the new SSTable to the target level.
             self.levels[target_level_idx].append(output_sstable_id)
             
             try:
                 self._write_manifest()
             except IOError as e:
+                # If manifest fails, we are in an inconsistent state, raise critical error
                 raise IOError(f"CRITICAL: Failed to write MANIFEST after L{level_idx} compaction. Old files were not deleted. {e}")
 
-            # Delete old SSTables that were successfully compacted
-            for sstable_id in all_input_sstables_for_compaction: # Only delete those that were input to this specific compaction
+            # 4. Delete old physical files (Cleanup)
+            for sstable_id in all_input_sstables_for_compaction: 
                 self.sstable_manager.delete_sstable_files(sstable_id)
-        
+
+            # Re-check compaction immediately after completion, as this may trigger the next level's compaction
+            self._check_and_trigger_compaction()
+        else:
+            raise IOError(f"CRITICAL: SSTable merge failed during L{level_idx} compaction.")
+
+            
     def close(self) -> None:
         if self.memtable and len(self.memtable) > 0:
             self._flush_memtable() # Ensure outstanding memtable data is flushed
         
+        # NEW: Stop compaction thread gracefully
+        if self._compaction_thread:
+            self._compaction_stop_event.set()
+            # Give the worker a chance to finish its current task or time out
+            self._compaction_thread.join(timeout=5) 
+        
         if self.wal:
             self.wal.close()
-        
