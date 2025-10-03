@@ -203,7 +203,7 @@ class LSMTreeStore(AbstractKVStore):
                 if task_type == "FLUSH_COMPLETE":
                     self._check_and_trigger_compaction()
             except Exception as e:
-                pass 
+                print(f"CRITICAL COMPACTION ERROR: Compaction failed in background thread: {type(e).__name__}: {e}") 
             finally:
                 self._compaction_queue.task_done()
 
