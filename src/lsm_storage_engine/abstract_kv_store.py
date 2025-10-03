@@ -24,6 +24,20 @@ class AbstractKVStore(ABC):
         os.makedirs(self.collection_path, exist_ok=True)
         print(f"AbstractKVStore initialized for path: {self.collection_path}") # For debugging
 
+    @property
+    @abstractmethod
+    def key_count(self) -> int:
+        """Returns the current number of key-value pairs in the store (for dynamic metadata)."""
+        pass 
+
+    @abstractmethod
+    def update_metadata(self) -> None:
+        """
+        Persists dynamic metadata (like key_count) to the collection's meta file.
+        Called on store closure or during flushing/compaction.
+        """
+        pass
+
     @abstractmethod
     def put(self, key: str, value: str) -> None:
         """Stores or updates a key-value pair."""

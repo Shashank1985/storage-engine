@@ -23,6 +23,7 @@ class LSMTreeStore(AbstractKVStore):
     DEFAULT_MAX_L0_SSTABLES = 4 # Trigger L0->L1 compaction
     COMPACTION_RATIO_T = 10
     LEVELED_CAPACITY_PROXY = 10
+    ENGINE_META_FILE = "engine.meta"
 
     def __init__(self, collection_path: str, options: dict = None):
         super().__init__(collection_path, options)
@@ -57,9 +58,29 @@ class LSMTreeStore(AbstractKVStore):
         self.level_size_ratio = current_options.get(
             "compaction_ratio", self.COMPACTION_RATIO_T
         )
-        
+        self._key_count: int = 0
         # load() will be called by StorageManager after instantiation.
         # If it were called here, and load() failed, the object might be in an inconsistent state.
+
+    def _get_meta_file_path(self) -> str: 
+        """Gets the path to the collection's metadata file."""
+        return os.path.join(self.collection_path, self.ENGINE_META_FILE)
+    
+    @property
+    def key_count(self) -> int:
+        return self._key_count
+
+    def update_metadata(self) -> None:
+        """Implements abstract method: reads, updates, and writes the key count."""
+        meta_file_path = self._get_meta_file_path()
+        try:
+            with open(meta_file_path, 'r', encoding='utf-8') as f:
+                meta_data = json.load(f)
+            meta_data["kv_pair_count"] = self._key_count        
+            with open(meta_file_path, 'w', encoding='utf-8') as f:
+                json.dump(meta_data, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Failed to update metadata file {meta_file_path}: {e}")
 
     def _generate_sstable_id(self) -> str:
         return f"sst_{int(time.time() * 1000000)}_{len(self.sstable_manager.get_all_sstable_ids_from_disk())}"
@@ -99,6 +120,14 @@ class LSMTreeStore(AbstractKVStore):
         self._load_manifest()
         self.wal = WriteAheadLog(self.wal_path)
         self.memtable = Memtable(threshold_bytes=self.memtable_flush_threshold_bytes)
+        meta_file_path = self._get_meta_file_path()
+        if os.path.exists(meta_file_path):
+            try:
+                with open(meta_file_path, 'r', encoding='utf-8') as f:
+                    meta_data = json.load(f)
+                self._key_count = meta_data.get("kv_pair_count", 0)
+            except Exception:
+                self._key_count = 0
         wal_entries = self.wal.replay() # WAL replay should handle its own errors gracefully
         if wal_entries:
             for entry in wal_entries:
@@ -117,20 +146,27 @@ class LSMTreeStore(AbstractKVStore):
     def put(self, key: str, value: str) -> None:
         if self.wal is None or self.memtable is None:
             raise RuntimeError("LSMTreeStore is not properly loaded")
+        exists_before_put = self.exists(key)
         self.wal.log_operation("PUT", key, value)
         self.memtable.put(key, value)
+        if not exists_before_put and value is not TOMBSTONE: 
+            self._key_count += 1
         if self.memtable.is_full():
             self._flush_memtable()
+            self.update_metadata()
 
     def delete(self, key: str) -> None:
         if self.wal is None or self.memtable is None:
             raise RuntimeError("LSMTreeStore not properly loaded. Call load() via StorageManager.")
 
+        exists_before_delete = self.exists(key) is not None
         self.wal.log_operation("DELETE", key)
         self.memtable.delete(key) # Uses TOMBSTONE internally
-
+        if exists_before_delete:
+            self._key_count = max(0, self._key_count - 1)
         if self.memtable.is_full(): # Or other criteria for flushing after deletes
             self._flush_memtable()
+            self.update_metadata()
 
 
     def get(self, key: str) -> str | None:
@@ -329,6 +365,7 @@ class LSMTreeStore(AbstractKVStore):
 
             
     def close(self) -> None:
+        self.update_metadata()
         if self.memtable and len(self.memtable) > 0:
             self._flush_memtable() # Ensure outstanding memtable data is flushed
         

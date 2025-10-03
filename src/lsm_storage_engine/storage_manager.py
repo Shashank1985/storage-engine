@@ -1,6 +1,7 @@
 import os
 import json
 from .abstract_kv_store import AbstractKVStore
+import datetime
 
 
 """
@@ -33,7 +34,7 @@ class StorageManager:
     def _get_meta_file_path(self, collection_name: str) -> str:
         return os.path.join(self._get_collection_path(collection_name), self.ENGINE_META_FILE)
 
-    def create_collection(self, name: str, engine_type: str = "lsmtree", options: dict = None) -> AbstractKVStore | None:
+    def create_collection(self, name: str, engine_type: str = "lsmtree", options: dict = None,description: str = "") -> AbstractKVStore | None:
         if name in self.collections:
             raise CollectionExistsError(f"Collection '{name}' is already loaded in memory.")
 
@@ -48,7 +49,14 @@ class StorageManager:
         os.makedirs(collection_path, exist_ok=True)
         
         options = options if options is not None else {}
-        meta_data = {"type": engine_type.lower(), "options": options}
+        meta_data = {
+            "name": name,                                        # Collection name
+            "type": engine_type.lower(),
+            "options": options,
+            "description": description,                          # User-provided description
+            "date_created": datetime.datetime.now().isoformat(), # Date created (ISO 8601 format)
+            "kv_pair_count": 0                                   # Initial key count
+        }
         
         try:
             with open(meta_file_path, 'w') as f:
