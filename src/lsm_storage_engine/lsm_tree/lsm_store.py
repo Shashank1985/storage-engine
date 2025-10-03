@@ -188,19 +188,17 @@ class LSMTreeStore(AbstractKVStore):
         """Dedicated thread function for handling compaction tasks."""
         while not self._compaction_stop_event.is_set():
             try:
-                # Task is a tuple (task_type, source_level_idx)
                 task_type, level_idx = self._compaction_queue.get(timeout=1) 
-                
-                if task_type == "FLUSH_COMPLETE":
-                    # Flush completion triggers a check for all possible compactions
-                    self._check_and_trigger_compaction()
-                
-                self._compaction_queue.task_done()
             except queue.Empty:
                 continue # Continue loop if queue is empty
+            
+            try:
+                if task_type == "FLUSH_COMPLETE":
+                    self._check_and_trigger_compaction()
             except Exception as e:
-                # Log any unexpected errors in the compaction process
-                pass
+                pass 
+            finally:
+                self._compaction_queue.task_done()
 
     def _check_and_trigger_compaction(self):
         """
