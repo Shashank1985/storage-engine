@@ -228,7 +228,7 @@ class SSTableManager:
                 os.remove(index_path)
                 deleted_count+=1
             if os.path.exists(meta_path):
-                os.remove(index_path)
+                os.remove(meta_path)
                 deleted_count+=1
             
         except IOError as e:
