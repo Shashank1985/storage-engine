@@ -3,6 +3,33 @@ import os
 import json 
 from .storage_manager import StorageManager, CollectionExistsError, CollectionNotFoundError, StorageError
 
+LSM_LOGO = """
+ ___        ________  ___      ___                      
+|"  |      /"       )|"  \    /"  |                     
+||  |     (:   \___/  \   \  //   |                     
+|:  |      \___  \    /\\  \/.    |                     
+ \  |___    __/  \\  |: \.        |                     
+( \_|:  \  /" \   :) |.  \    /:  |                     
+ \_______)(_______/  |___|\__/|___|                     
+                                                        
+ __   ___  ___      ___                                 
+|/"| /  ")|"  \    /"  |                                
+(: |/   /  \   \  //  /                                 
+|    __/    \\  \/. ./                                  
+(// _  \     \.    //                                   
+|: | \  \     \\   /                                    
+(__|  \__)     \__/                                     
+                                                        
+  ________  ___________  ______     _______    _______  
+ /"       )("     _   ")/    " \   /"      \  /"     "| 
+(:   \___/  )__/  \\__/// ____  \ |:        |(: ______) 
+ \___  \       \\_ /  /  /    ) :)|_____/   ) \/    |   
+  __/  \\      |.  | (: (____/ //  //      /  // ___)_  
+ /" \   :)     \:  |  \        /  |:  __   \ (:      "| 
+(_______/       \__|   \"_____/   |__|  \___) \_______) 
+                                                        
+"""
+
 
 def print_cli_help():
     print("\nSimple Storage Engine CLI - Available Commands:")
@@ -22,9 +49,10 @@ def print_cli_help():
 def main():
     data_dir = os.path.join(os.getcwd(), "data")
     manager = StorageManager(base_data_path=data_dir)
-    
-    print("Welcome to LSM Storage Engine CLI!")
+
+    print(LSM_LOGO)    
     print(f"Data will be stored in: {manager.base_data_path}")
+    print("======================================================================================")
     print_cli_help()
 
     while True:
