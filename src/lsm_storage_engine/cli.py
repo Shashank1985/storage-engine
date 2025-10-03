@@ -33,7 +33,7 @@ LSM_LOGO = """
 
 def print_cli_help():
     print("\nSimple Storage Engine CLI - Available Commands:")
-    print("  CREATE <name> [lsmtree|btree]  - Create a new collection (default: lsmtree).")
+    print("  CREATE <name> [lsmtree|btree] [description]  - Create a new collection (default: lsmtree).")
     print("  USE <name>                     - Switch to an existing collection to make it active.")
     print("  LIST                           - List all available collections on disk.")
     print("  ACTIVE                         - Show the currently active collection.")
@@ -42,6 +42,7 @@ def print_cli_help():
     print("  GET <key>                      - Retrieve value by key from active collection.")
     print("  DELETE <key>                   - Delete key-value from active collection.")
     print("  EXISTS <key>                   - Check if key exists in active collection.")
+    print("  META                           - Show the metadata for the active collection.")
     print("  HELP                           - Show this help message.")
     print("  EXIT                           - Exit the application.")
     print()
@@ -81,18 +82,20 @@ def main():
                 print_cli_help()
             elif command == "CREATE":
                 if not args or len(args) < 1:
-                    print("Usage: CREATE <name> [lsmtree|btree]")
+                    print("Usage: CREATE <name> [lsmtree|btree] [description]")
                     continue
                 coll_name = args[0]
                 engine = "lsmtree" # Default
-                if len(args) > 1:
+                description = ""
+                if len(args) >= 2:
                     engine_choice = args[1].lower()
                     if engine_choice in ["lsmtree", "btree"]:
                         engine = engine_choice
+                        if len(args) > 2:
+                            description = args[2]
                     else:
-                        print(f"Invalid engine type: {args[1]}. Choose 'lsmtree' or 'btree'.")
-                        continue
-                manager.create_collection(coll_name, engine)
+                        description = args[1]
+                manager.create_collection(coll_name, engine,description=description)
 
             elif command == "USE":
                 if not args or len(args) < 1:
@@ -120,7 +123,27 @@ def main():
                 coll_name = args[0]
                 manager.close_collection(coll_name)
                 print(f"Collection '{coll_name}' has been successfully closed.")
-
+            elif command == "META": 
+                if manager.active_collection_name:
+                    coll_name = manager.active_collection_name
+                    meta_file_path = manager._get_meta_file_path(coll_name) # Reuse StorageManager helper
+                    
+                    if os.path.exists(meta_file_path):
+                        with open(meta_file_path, 'r') as f:
+                            meta_data = json.load(f)
+                        
+                        print(f"\n--- Metadata for Collection: {coll_name} ---")
+                        print(f"  Name: {meta_data.get('name', 'N/A')}")
+                        print(f"  Type: {meta_data.get('type', 'N/A')}")
+                        print(f"  Description: {meta_data.get('description', 'N/A')}")
+                        print(f"  Date Created: {meta_data.get('date_created', 'N/A')}")
+                        print(f"  Key-Value Pairs: {meta_data.get('kv_pair_count', 'N/A')}")
+                        print(f"  Configuration Options: {meta_data.get('options', 'N/A')}")
+                        print("-----------------------------------------")
+                    else:
+                        print(f"Error: Metadata file not found for collection '{coll_name}'.")
+                else:
+                    print("No collection is currently active. Use 'USE <name>'.")
             # Commands requiring an active collection
             else:
                 active_store = manager.get_active_collection()
