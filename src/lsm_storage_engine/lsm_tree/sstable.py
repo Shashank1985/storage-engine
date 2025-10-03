@@ -75,7 +75,7 @@ class SSTableManager:
             raise IOError(f"Error writing SSTable {sstable_id}: {e}")
 
     def find_in_sstable(self, sstable_id: str, target_key: str) -> tuple[any, bool]:
-        data_path, index_path = self._get_sstable_paths(sstable_id)
+        data_path, index_path,_ = self._get_sstable_paths(sstable_id)
 
         if not os.path.exists(data_path):
             return None, False
