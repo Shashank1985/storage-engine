@@ -160,7 +160,7 @@ class SSTableManager:
         iterators = []
         try:
             for i, sstable_id in enumerate(sstable_ids_to_compact):
-                data_path, _ = self._get_sstable_paths(sstable_id)
+                data_path, _,_ = self._get_sstable_paths(sstable_id)
                 if not os.path.exists(data_path): continue
                 
                 file_handle = open(data_path, 'r', encoding='utf-8')
