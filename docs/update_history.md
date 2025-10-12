@@ -11,10 +11,13 @@ Added a close command to close the active collection and use a new one, if by ac
 * **Compaction**: Merging and compaction were moved to a background worker thread to prevent blocking incoming write requests on the single main thread.
 * **Leveled Compaction**: Implemented leveled compaction, which ensures SSTables within a level (Li+) are strictly non-overlapping, improving read performance and reducing read amplification.
 
-## 2 Oct 2025, version 1.0.7 (latest version)
+## 2 Oct 2025, version 1.0.7 
 * Support metadata generation for each collection. 
 * Metadata includes:
     1. User written description for created collection
     2. Key-value pair count
     3. Date & time of created collection
     etc.
+
+## 12 Oct 2025, version 1.1.1 (latest version)
+* Added a bloom filter for supporting fast key searches.

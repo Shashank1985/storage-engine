@@ -19,8 +19,9 @@ The core architecture is composed of the three fundamental components of an LSM-
 LSM-Trees are write-optimized, making the read path more complicated compared to B-Trees.
 
 1.  A read request first searches the **Memtable**.
-2.  If not found, the search continues to the **SSTables** across various levels. The search prioritizes newer data: L0 (newest to oldest), then L1, L2, and so on.
-3. **Using the Sparse Index**: For a given SSTable, the read request first checks the sparse index (`.idx` file) to find the nearest key that is less than or equal to the target key. This index entry provides the **byte offset** in the main data file (`.dat`), allowing the system to skip most of the file and begin scanning from the approximate location of the key, minimizing disk I/O.
+2.  The bloom filter is first queried for the required key. The search is conducted based on the bloom filter's return value, check docs/concepts/BloomFilter.md for internal working.
+3.  If not found in the memtable and the bloom filter returns positive, the search continues to the **SSTables** across various levels. The search prioritizes newer data: L0 (newest to oldest), then L1, L2, and so on.
+4. **Using the Sparse Index**: For a given SSTable, the read request first checks the sparse index (`.idx` file) to find the nearest key that is less than or equal to the target key. This index entry provides the **byte offset** in the main data file (`.dat`), allowing the system to skip most of the file and begin scanning from the approximate location of the key, minimizing disk I/O.
 
 
 ## Asynchronous Compaction System (v1.0.0)
