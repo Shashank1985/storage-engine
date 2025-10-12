@@ -7,8 +7,74 @@ import os
 import json
 import bisect
 import heapq 
+import mmh3
+import math
 
 TOMBSTONE_VALUE = "__TOMBSTONE__" 
+
+class BloomFilter:
+    BITS_COUNT = 10000 
+    NUM_HASHES = 3     
+
+    def __init__(self, bit_array=None):
+        if bit_array:
+            self._bits = bit_array
+        else:
+            self._bits = [False] * self.BITS_COUNT
+
+    def _hash_funcs(self, key: str) -> list[int]:
+        """
+        Generates K hash indices using MurmurHash3 and double hashing.
+        The formula h_i(x) = (h1(x) + i * h2(x)) mod m is used for i = 0 to K-1 (Kirsch-Mitzenmacher-Optimization)
+        """
+        key_bytes = key.encode('utf-8')
+        
+        # MurmurHash3 with two different seeds provides two independent hash outputs (h1 and h2)
+        h1 = mmh3.hash(key_bytes, seed=42)
+        h2 = mmh3.hash(key_bytes, seed=128)
+        
+        indices = []
+        for i in range(self.NUM_HASHES):
+            index = abs(h1 + i * h2) % self.BITS_COUNT
+            indices.append(index)
+            
+        return indices
+    
+    def add(self, key: str):
+        """Adds a key to the filter."""
+        for index in self._hash_funcs(key):
+            self._bits[index] = True
+
+    def check(self, key: str) -> bool:
+        """Checks if a key might be present. Returns False if definitely not present."""
+        for index in self._hash_funcs(key):
+            if not self._bits[index]:
+                return False # Definitely not present
+        return True # Might be present (False positive possible)
+
+    @classmethod
+    def from_file(cls, bf_path: str):
+        """Loads the Bloom Filter state from a file."""
+        if not os.path.exists(bf_path):
+            return None 
+            
+        try:
+            with open(bf_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if len(data) == cls.BITS_COUNT:
+                    return cls(bit_array=data)
+                return None 
+        except (IOError, json.JSONDecodeError):
+            return None
+            
+    def write_to_file(self, bf_path: str) -> bool:
+        """Writes the Bloom Filter state to a file."""
+        try:
+            with open(bf_path, 'w', encoding='utf-8') as f:
+                json.dump(self._bits, f)
+            return True
+        except IOError:
+            return False
 
 class SSTableManager:
     """
@@ -28,23 +94,25 @@ class SSTableManager:
         data_path = f"{base_path}.dat"  # Data file
         index_path = f"{base_path}.idx" # Index file
         meta_path = f"{base_path}.meta" #metadata file to hold min_key and max_key
-        return data_path, index_path,meta_path
+        bloom_path = f"{base_path}.bf"
+        return data_path, index_path,meta_path,bloom_path
 
     def write_sstable(self, sstable_id: str, sorted_items: list[tuple[str, any]]) -> bool:
         """
         Writes a list of sorted key-value items to a new SSTable and its sparse index.
         `sorted_items` is a list of (key, value) tuples, where value can be TOMBSTONE_VALUE.
         """
-        data_path, index_path,meta_path = self._get_sstable_paths(sstable_id)
+        data_path, index_path,meta_path,bloom_path = self._get_sstable_paths(sstable_id)
         sparse_index_entries = []
         current_offset = 0
         entry_count = 0
 
+        bloom_filter = BloomFilter()
         try:
             with open(data_path, 'w', encoding='utf-8') as data_f:
                 for key, value in sorted_items:
                     actual_value = TOMBSTONE_VALUE if value is TOMBSTONE_VALUE else value
-                    
+                    bloom_filter.add(key)
                     log_entry = {"key": key, "value": actual_value}
                     json_line = json.dumps(log_entry) + '\n'
                     
@@ -61,6 +129,7 @@ class SSTableManager:
                     json.dump(sparse_index_entries, index_f)
             
             if entry_count > 0:
+                bloom_filter.write_to_file(bloom_path)
                 min_key = sorted_items[0][0]
                 max_key = sorted_items[-1][0]
                 meta_data = {"min_key": min_key, "max_key": max_key}
@@ -72,10 +141,25 @@ class SSTableManager:
             if os.path.exists(data_path): os.remove(data_path)
             if os.path.exists(index_path): os.remove(index_path)
             if os.path.exists(meta_path): os.remove(meta_path)
+            if os.path.exists(bloom_path): os.remove(bloom_path)
             raise IOError(f"Error writing SSTable {sstable_id}: {e}")
+    
+    def check_bloom_filter(self, sstable_id: str, target_key: str) -> bool:
+        """
+        Checks the Bloom Filter for a key.
+        Returns True if key MIGHT be present, False if DEFINITELY not present.
+        """
+        _, _, _, bloom_path = self._get_sstable_paths(sstable_id)
+        
+        # Load filter and check
+        bloom_filter = BloomFilter.from_file(bloom_path)
+        if bloom_filter is None:
+            # If the file doesn't exist (e.g., older SSTable), assume key might be present
+            return True 
+        return bloom_filter.check(target_key)
 
     def find_in_sstable(self, sstable_id: str, target_key: str) -> tuple[any, bool]:
-        data_path, index_path,_ = self._get_sstable_paths(sstable_id)
+        data_path, index_path,_,_ = self._get_sstable_paths(sstable_id)
 
         if not os.path.exists(data_path):
             return None, False
@@ -143,7 +227,7 @@ class SSTableManager:
 
     def get_sstable_key_range(self, sstable_id: str) -> tuple[str, str] | None:
         """Retrieves the min and max key for an SSTable from its metadata file."""
-        _, _, meta_path = self._get_sstable_paths(sstable_id)
+        _, _, meta_path,_ = self._get_sstable_paths(sstable_id)
         if os.path.exists(meta_path):
             try:
                 with open(meta_path, 'r', encoding='utf-8') as f:
@@ -160,7 +244,7 @@ class SSTableManager:
         iterators = []
         try:
             for i, sstable_id in enumerate(sstable_ids_to_compact):
-                data_path, _,_ = self._get_sstable_paths(sstable_id)
+                data_path, _,_,_ = self._get_sstable_paths(sstable_id)
                 if not os.path.exists(data_path): continue
                 
                 file_handle = open(data_path, 'r', encoding='utf-8')
@@ -218,7 +302,7 @@ class SSTableManager:
             file_handle.close()
     def delete_sstable_files(self, sstable_id: str):
         """Deletes the .dat and .idx files for a given sstable_id."""
-        data_path, index_path,meta_path = self._get_sstable_paths(sstable_id)
+        data_path, index_path,meta_path,bloom_path = self._get_sstable_paths(sstable_id)
         deleted_count = 0
         try:
             if os.path.exists(data_path):
@@ -229,6 +313,9 @@ class SSTableManager:
                 deleted_count+=1
             if os.path.exists(meta_path):
                 os.remove(meta_path)
+                deleted_count+=1
+            if os.path.exists(bloom_path):
+                os.remove(bloom_path)
                 deleted_count+=1
             
         except IOError as e:

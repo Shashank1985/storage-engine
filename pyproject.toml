@@ -24,7 +24,7 @@ classifiers = [
     "Environment :: Console",
 ]
 
-dependencies = ["sortedcontainers"]
+dependencies = ["sortedcontainers","mmh3"]
 
 [project.urls]
 Homepage = "https://github.com/Shashank1985/storage-engine"

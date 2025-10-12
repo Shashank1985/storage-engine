@@ -182,6 +182,8 @@ class LSMTreeStore(AbstractKVStore):
             search_order = reversed(sstable_ids_in_level) if level_idx == 0 else sstable_ids_in_level
             
             for sstable_id in search_order:
+                if not self.sstable_manager.check_bloom_filter(sstable_id, key):
+                    continue 
                 # find_in_sstable returns (value, is_tombstone_found)
                 # value could be TOMBSTONE_VALUE (string) if is_tombstone_found is true
                 sstable_val, was_tombstone_str = self.sstable_manager.find_in_sstable(sstable_id, key)
