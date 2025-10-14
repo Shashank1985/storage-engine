@@ -19,5 +19,8 @@ Added a close command to close the active collection and use a new one, if by ac
     3. Date & time of created collection
     etc.
 
-## 12 Oct 2025, version 1.1.1 (latest version)
+## 12 Oct 2025, version 1.1.1 
 * Added a bloom filter for supporting fast key searches.
+
+## 14 Oct 2025, version 1.2.0 (latest version)
+* Migrated storage engine to client-server architecture. Storage engine functionality works behind a lightweight FastAPI server and uses REST APIs to communicate.

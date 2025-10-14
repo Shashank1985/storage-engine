@@ -35,13 +35,22 @@ finally:
 ```
 
 # Usage as CLI
-run the command on terminal
+You will require 2 seperate terminals.
 
+
+Run this command on one terminal to start the server
+```
+lsm-server
+```
+* **Default Behaviour**: The server starts on http://127.0.0.1:8000.
+* **Data Path**:  It stores all collection data in a directory (default: lsm_server_data in the current working directory).
+* **Graceful Shutdown**: On shutdown (e.g., via Ctrl+C), the server ensures all active collections are gracefully closed and flushed to disk.
+
+Run this command on another terminal to start the client cli tool
 ```
 lsm-cli
 ```
-This will print the cli help with all the functions, follow the instructions as per the cli help.
-
+This will first connect to the server and then print the cli help. Follow the instructions given in the cli help.
 
 # General Rules
 1. Create a collection, be sure to give a good description of the collection

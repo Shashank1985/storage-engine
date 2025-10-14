@@ -9,6 +9,9 @@ It is a persistent key-value store featuring:
 * An in-memory Memtable using `SortedDict`.
 * Persistent Sorted String Tables (SSTables).
 * Asynchronous, leveled compaction handled by a background worker thread (introduced in v1.0.0).
+* Metadata generation for created collections
+* Bloom filter functionality to prevent unnecessary disk operations for keys that we know dont exist in the collection
+* Storage engine is behind a FastAPI server and can be communicated with using REST APIs.
 
 ## Getting Started
 * Detailed documentation and explanation of each component is available in the docs folder.
@@ -16,7 +19,7 @@ It is a persistent key-value store featuring:
 ## Contributing
 Contributions, issues and feature requests are welcome!
 **Contributing ideas**
-* Implement a proper testing suite for different components
+* Implement a proper testing suite for different components. Unit tests, Integration Tests
 * Thread safety for multi threaded programs
 * UI features along with CLI and library utilisation. 
 and many more, ideas are always welcome!
