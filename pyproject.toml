@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lsm-storage-engine-key-value-store" 
-version = "1.1.1"
+version = "1.2.0"
 authors = [
   { name="Shashank", email="shashankshashidhar73@gmail.com" },
 ]
@@ -24,12 +24,17 @@ classifiers = [
     "Environment :: Console",
 ]
 
-dependencies = ["sortedcontainers","mmh3"]
+dependencies = ["sortedcontainers",
+                "mmh3",
+                "fastapi",
+                "uvicorn",
+                "requests"]
 
 [project.urls]
 Homepage = "https://github.com/Shashank1985/storage-engine"
 Issues = "https://github.com/Shashank1985/storage-engine/issues"
 
-# This section creates the command-line tool.
+# This section creates the command-line tool and starts the server.
 [project.scripts]
 lsm-cli = "lsm_storage_engine.cli:main"
+lsm-server = "lsm_storage_engine.server:run_server"

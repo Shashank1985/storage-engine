@@ -5,7 +5,7 @@ import os
 import sys
 import urllib.parse
 from typing import Optional
-SERVER_URL = os.environ.get("LSM_SERVER_URL", "http://127.0.0.1:8541")
+SERVER_URL = os.environ.get("LSM_SERVER_URL", "http://127.0.0.1:8000")
 
 LSM_LOGO = """
  ___        ________  ___      ___                      
