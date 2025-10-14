@@ -11,7 +11,7 @@ from .storage_manager import (
     StorageError
 )
 DATA_PATH = os.environ.get("LSM_DATA_PATH", os.path.join(os.getcwd(), "lsm_server_data"))
-SERVER_PORT = int(os.environ.get("LSM_SERVER_PORT", 8541))
+SERVER_PORT = int(os.environ.get("LSM_SERVER_PORT", 8000))
 
 SERVER_MANAGER = StorageManager(base_data_path=DATA_PATH)
 app = FastAPI(title="LSM Storage Engine Server", version="1.1.1")
@@ -183,3 +183,23 @@ def exists_kv(key: str):
         return {"status": "OK", "exists": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"EXISTS failed: {str(e)}")
+
+
+@app.get("/internal/levels", tags=["Internal (Testing)"])
+def get_levels_status():
+    """
+    Returns the current SSTable level status for the active collection. 
+    Used by test_async.py to monitor compaction progress.
+    """
+    try:
+        active_store = get_active_store()
+        # Ensure the active store is an LSMTreeStore to access its internal properties
+        if hasattr(active_store, 'levels'):
+            # Return a list of lists representing the levels structure
+            return {"status": "OK", "levels": active_store.levels}
+        else:
+            raise HTTPException(status_code=400, detail="Active collection is not an LSMTreeStore.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error checking levels: {str(e)}")
