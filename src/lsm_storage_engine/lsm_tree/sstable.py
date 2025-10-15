@@ -115,7 +115,7 @@ class SSTableManager:
                     actual_value = TOMBSTONE_VALUE if value is TOMBSTONE_VALUE else value
                     bloom_filter.add(key)
                     log_entry = {"key": key, "value": actual_value}
-                    packed_entry = msgpack.pack(log_entry)
+                    packed_entry = msgpack.packb(log_entry)
                     
                     if entry_count % self.SPARSE_INDEX_SAMPLING_RATE == 0: #append every 10 entries
                         sparse_index_entries.append({"key": key, "offset": current_offset})
