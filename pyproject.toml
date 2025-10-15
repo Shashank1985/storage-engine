@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lsm-storage-engine-key-value-store" 
-version = "1.2.0"
+version = "1.2.1"
 authors = [
   { name="Shashank", email="shashankshashidhar73@gmail.com" },
 ]
@@ -28,7 +28,8 @@ dependencies = ["sortedcontainers",
                 "mmh3",
                 "fastapi",
                 "uvicorn",
-                "requests"]
+                "requests",
+                "msgpack"]
 
 [project.urls]
 Homepage = "https://github.com/Shashank1985/storage-engine"

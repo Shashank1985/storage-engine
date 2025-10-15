@@ -8,6 +8,7 @@ import json
 import bisect
 import heapq 
 import mmh3
+import msgpack
 import math
 
 TOMBSTONE_VALUE = "__TOMBSTONE__" 
@@ -91,7 +92,7 @@ class SSTableManager:
     def _get_sstable_paths(self, sstable_id: str) -> tuple[str, str]:
         """Helper to get data and index file paths."""
         base_path = os.path.join(self.sstables_dir, sstable_id)
-        data_path = f"{base_path}.dat"  # Data file
+        data_path = f"{base_path}.mpk"  # Data file
         index_path = f"{base_path}.idx" # Index file
         meta_path = f"{base_path}.meta" #metadata file to hold min_key and max_key
         bloom_path = f"{base_path}.bf"
@@ -99,7 +100,7 @@ class SSTableManager:
 
     def write_sstable(self, sstable_id: str, sorted_items: list[tuple[str, any]]) -> bool:
         """
-        Writes a list of sorted key-value items to a new SSTable and its sparse index.
+        Writes a list of sorted key-value items in messagepack(binary) form to a new SSTable and its sparse index.
         `sorted_items` is a list of (key, value) tuples, where value can be TOMBSTONE_VALUE.
         """
         data_path, index_path,meta_path,bloom_path = self._get_sstable_paths(sstable_id)
@@ -109,18 +110,18 @@ class SSTableManager:
 
         bloom_filter = BloomFilter()
         try:
-            with open(data_path, 'w', encoding='utf-8') as data_f:
+            with open(data_path, 'wb') as data_f:
                 for key, value in sorted_items:
                     actual_value = TOMBSTONE_VALUE if value is TOMBSTONE_VALUE else value
                     bloom_filter.add(key)
                     log_entry = {"key": key, "value": actual_value}
-                    json_line = json.dumps(log_entry) + '\n'
+                    packed_entry = msgpack.pack(log_entry)
                     
                     if entry_count % self.SPARSE_INDEX_SAMPLING_RATE == 0: #append every 10 entries
                         sparse_index_entries.append({"key": key, "offset": current_offset})
                     
-                    data_f.write(json_line)
-                    current_offset += len(json_line.encode('utf-8')) # More accurate byte offset
+                    data_f.write(packed_entry)
+                    current_offset += len(packed_entry)
                     entry_count += 1
             
             # Write the sparse index
@@ -182,35 +183,29 @@ class SSTableManager:
             except (IOError, json.JSONDecodeError, IndexError) as e: # Added IndexError
                 start_offset = 0
         try:
-            with open(data_path, 'r', encoding='utf-8') as data_f:
+            with open(data_path, 'rb') as data_f:
                 if start_offset > 0:
                     data_f.seek(start_offset)
+                unpacker = msgpack.Unpacker(data_f, raw=False)
                 
-                # For now, we scan until we find the key or a larger key.
-                for line_number, line in enumerate(data_f): # enumerate for potential debug/logging
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        entry = json.loads(line)
-                        current_key = entry["key"]
-                         
-
-                        if current_key == target_key:
-                            value = entry.get("value")
-                            return value, value == TOMBSTONE_VALUE
+                for entry in unpacker:
+                    current_key = entry.get("key")
+                     
+                    if current_key == target_key:
+                        value = entry.get("value")
+                        return value, value == TOMBSTONE_VALUE
                             
-                        # Optimization: if current_key is already greater than target_key,
-                        # and the SSTable is sorted, we can stop early.
-                        if current_key > target_key:
-                            return None, False 
+                    # Optimization: if current_key is already greater than target_key,
+                    if current_key > target_key:
+                        return None, False 
 
-                    except json.JSONDecodeError:
-                        continue 
             
             return None, False # Key not found after scanning relevant part (or whole file)
         except IOError as e:
             raise IOError(f"Error reading SSTable {data_path}: {e}")
+        except msgpack.exceptions.UnpackException as e: # <-- NEW EXCEPTION HANDLER
+            print(f"Warning: MessagePack unpack error in {data_path}: {e}")
+            return None, False
     def get_all_sstable_ids_from_disk(self) -> list[str]:
         """
         Scans the sstables_dir and returns a sorted list of SSTable IDs.
@@ -247,7 +242,7 @@ class SSTableManager:
                 data_path, _,_,_ = self._get_sstable_paths(sstable_id)
                 if not os.path.exists(data_path): continue
                 
-                file_handle = open(data_path, 'r', encoding='utf-8')
+                file_handle = open(data_path, 'rb')
                 it = self._sstable_line_reader(file_handle, i)
                 iterators.append(it) # Keep track to close file handle
                 
@@ -291,13 +286,14 @@ class SSTableManager:
         return True
 
     def _sstable_line_reader(self, file_handle, sstable_index):
+        """Helper iterator for msgpack files"""
         try:
-            for line in file_handle:
-                if line.strip():
-                    try:
-                        yield json.loads(line), sstable_index
-                    except json.JSONDecodeError:
-                        continue
+            unpacker = msgpack.Unpacker(file_handle, raw=False)
+            for entry in unpacker:
+                yield entry, sstable_index
+        except msgpack.exceptions.UnpackException: # <-- NEW EXCEPTION HANDLER
+             # Handle error during stream reading
+             pass 
         finally:
             file_handle.close()
     def delete_sstable_files(self, sstable_id: str):
