@@ -11,9 +11,12 @@ The core architecture is composed of the three fundamental components of an LSM-
 ## Data Flow (Write Path)
 1.  A write request is received.
 2.  The operation is recorded in the **WAL** for crash recovery.
-3.  The key-value pair is pushed to the **Memtable** (a sorted container in memory).
-4.  Once the Memtable reaches a pre-defined **size threshold** (default 4MB), it is flushed into a new persistent SSTable in Level 0 (L0).
-5.  After the flush is complete, the WAL is truncated.
+3. The key-value pair is pushed to the bloom filter.
+4.  The key-value pair is pushed to the **Memtable** (a sorted container in memory).
+5.  Once the Memtable reaches a pre-defined **size threshold** (default 4MB), it is flushed into a new persistent SSTable in Level 0 (L0). The memtable flush is done in 2 cases:
+    * Upon closing of the active collection to which you are writing the pairs
+    * Memtable reaches a certain size threshold.
+6.  After the flush is complete, the WAL is truncated.
 
 ## Data Flow (Read Path)
 LSM-Trees are write-optimized, making the read path more complicated compared to B-Trees.

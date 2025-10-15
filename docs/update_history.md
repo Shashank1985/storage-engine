@@ -22,5 +22,8 @@ Added a close command to close the active collection and use a new one, if by ac
 ## 12 Oct 2025, version 1.1.1 
 * Added a bloom filter for supporting fast key searches.
 
-## 14 Oct 2025, version 1.2.0 (latest version)
+## 14 Oct 2025, version 1.2.0 
 * Migrated storage engine to client-server architecture. Storage engine functionality works behind a lightweight FastAPI server and uses REST APIs to communicate.
+
+## 15 Oct 2025, version 1.2.2 (latest version)
+* Migrated sstables storage from json files to msgpack binary format.
