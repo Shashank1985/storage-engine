@@ -47,6 +47,7 @@ def print_cli_help():
     print("  GET <key>                      - Retrieve value by key.")
     print("  DELETE <key>                   - Delete key-value.")
     print("  EXISTS <key>                   - Check if key exists.")
+    print("  RANGE <start_key> <end_key>    - Retrieve key-value pairs in a sorted range [start, end].")
     print("  META                           - Show the metadata for the active collection.")
     print("  HELP                           - Show this help message.")
     print("  EXIT                           - Exit the application.")
@@ -249,7 +250,55 @@ def main():
             
             if response and response.status_code == 200:
                 print(response.json().get("exists"))
+        elif command == "RANGE":
+            if len(args) < 2:
+                print("Usage: RANGE <start_key> <end_key>")
+                continue
+            start_key, end_key = args[0], args[1]
+            
+            # URL-encode keys for query parameters
+            encoded_start = urllib.parse.quote(start_key, safe="")
+            encoded_end = urllib.parse.quote(end_key, safe="")
+            endpoint = f"/kv/range?start_key={encoded_start}&end_key={encoded_end}"
+            
+            # The server streams the JSON response, so we need a special way to read it.
+            try:
+                response = requests.get(f"{SERVER_URL}{endpoint}", stream=True)
+                if not response.ok:
+                    try:
+                        error_detail = response.json().get('detail', f"HTTP Error: {response.status_code}")
+                    except:
+                        error_detail = response.text.strip()
+                    print(f"Server Error ({response.status_code}): {error_detail}")
+                    continue
 
+                # Read and parse the streamed JSON
+                print(f"\n--- Range Query: ['{start_key}' to '{end_key}'] ---")
+                
+                # The response is streamed as a single JSON array, which requests treats as text chunks.
+                # We simply combine all chunks and try to parse the final JSON.
+                full_json_text = response.text
+                
+                try:
+                    results = json.loads(full_json_text)
+                    if isinstance(results, list):
+                        count = 0
+                        for item in results:
+                            print(f"{item.get('key')}: {item.get('value')}")
+                            count += 1
+                        print(f"--- Retrieved {count} key(s) ---")
+                    else:
+                        print("Error: Invalid response format from server.")
+                        
+                except json.JSONDecodeError:
+                    print("\nError: Could not decode complete JSON response (possible partial stream or server error).")
+                    print(f"Raw received data snippet: {full_json_text[:200]}...")
+                
+            except requests.exceptions.ConnectionError:
+                print(f"\nCRITICAL: Connection failed. Is the LSM server running at {SERVER_URL}?")
+                sys.exit(1)
+            except Exception as e:
+                print(f"An unexpected client error occurred during RANGE query: {type(e).__name__}: {e}") 
         else:
             print(f"Unknown command: '{command}'. Type 'HELP' for available commands.")
 

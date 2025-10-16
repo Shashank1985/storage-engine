@@ -192,7 +192,7 @@ def range_query_kv(start_key: str, end_key: str):
     active_store = get_active_store()
     
     try:
-        # Get the Python iterator/generator from the LSM store
+        # returns an iterator over the store which contains all the found keys
         range_iterator = active_store.range_query(start_key, end_key)
         
         # Use StreamingResponse to send the iterator output back to the client immediately
