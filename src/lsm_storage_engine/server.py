@@ -2,7 +2,9 @@ import os
 import uvicorn
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
-from typing import Optional, List, Any, Union
+from typing import Optional, Iterator,Tuple
+from fastapi.responses import StreamingResponse
+
 import json
 from .storage_manager import (
     StorageManager, 
@@ -59,6 +61,23 @@ def get_active_store():
     if active_store is None:
         raise HTTPException(status_code=500, detail="Active collection is named but not loaded.")
     return active_store
+
+def iterator_to_json_stream(iterator: Iterator[Tuple[str, str]]):
+    """
+    Takes a Python iterator and yields JSON strings suitable for streaming.
+    The format is [ {key: v, value: v}, {key: v, value: v}, ... ]
+    """
+    yield '[' # Start JSON Array
+    first_item = True
+    for key, value in iterator:
+        if not first_item:
+            yield ',' # Separator for subsequent items
+        
+        # NOTE: Keys and values must be JSON-encoded here.
+        yield json.dumps({"key": key, "value": value})
+        first_item = False
+    
+    yield ']'
 
 # --- Collection Management Endpoints ---
 
@@ -163,6 +182,29 @@ def get_kv(key: str):
             return {"status": "NOT_FOUND", "key": key, "value": None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"GET failed: {str(e)}")
+
+@app.get("/kv/range", tags=["Key-Value Operations"])
+def range_query_kv(start_key: str, end_key: str):
+    """
+    Retrieves a range of key-value pairs using a heap merge iterator.
+    The response is streamed to prevent memory exhaustion for large ranges.
+    """
+    active_store = get_active_store()
+    
+    try:
+        # Get the Python iterator/generator from the LSM store
+        range_iterator = active_store.range_query(start_key, end_key)
+        
+        # Use StreamingResponse to send the iterator output back to the client immediately
+        return StreamingResponse(
+            iterator_to_json_stream(range_iterator),
+            media_type="application/json"
+        )
+    except Exception as e:
+        # Note: If the error occurs after streaming starts, the client might receive 
+        # a partially complete JSON array. The CLI will need to handle this robustly.
+        raise HTTPException(status_code=500, detail=f"RANGE query failed: {str(e)}")
+
 
 @app.post("/kv/delete", tags=["Key-Value Operations"])
 def delete_kv(data: KeyRequest):

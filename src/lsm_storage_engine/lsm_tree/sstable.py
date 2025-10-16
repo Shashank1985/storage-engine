@@ -1,15 +1,10 @@
-"""Simple SSTable implementation with sparse index storing key and file offset and tombstone handling.
-This module provides functionality to write, read, and compact SSTables.
-Merges and compacts multiple SSTables into a single one using a k-way merge algorithm (similar to merge k sorted lists Leetcode).
-everytime a new SSTable is created, it is written to disk and sparse index is created.
-"""
 import os
 import json
 import bisect
 import heapq 
 import mmh3
 import msgpack
-import math
+from typing import Tuple,Iterator
 
 TOMBSTONE_VALUE = "__TOMBSTONE__" 
 
@@ -206,6 +201,68 @@ class SSTableManager:
         except msgpack.exceptions.UnpackException as e: # <-- NEW EXCEPTION HANDLER
             print(f"Warning: MessagePack unpack error in {data_path}: {e}")
             return None, False
+        
+    def range_iterator(self, sstable_id: str, start_key: str, end_key: str) -> Iterator[Tuple[str, str]]:
+        """
+        Reads key-value pairs from an SSTable within the specified key range [start_key, end_key].
+        Yields (key, value) pairs. Uses sparse index for quick seek.
+        """
+        data_path, index_path, _, _ = self._get_sstable_paths(sstable_id)
+
+        if not os.path.exists(data_path):
+            return
+
+        start_offset = 0
+        #use sparse index first
+        if os.path.exists(index_path):
+            try:
+                with open(index_path, 'r', encoding='utf-8') as index_f:
+                    sparse_index_entries = json.load(index_f)
+                
+                if sparse_index_entries: 
+                    index_keys = [entry["key"] for entry in sparse_index_entries]
+                    
+                    # Find insertion point for the start_key (or the one just before it)
+                    idx = bisect.bisect_right(index_keys, start_key)
+                    
+                    # We want the index entry *before* the start key to ensure we don't skip it
+                    if idx > 0:
+                        start_offset = sparse_index_entries[idx-1]["offset"]
+                
+            except (IOError, json.JSONDecodeError, IndexError):
+                # Fallback to reading from the start
+                start_offset = 0
+
+        # 2. Iterate through data file from the starting offset
+        file_handle = None
+        try:
+            file_handle = open(data_path, 'rb')
+            if start_offset > 0:
+                file_handle.seek(start_offset)
+                
+            unpacker = msgpack.Unpacker(file_handle, raw=False)
+            
+            for entry in unpacker:
+                current_key = entry.get("key")
+                
+                # Check 1: Stop reading if key is past the end of the range (exclusive end)
+                if current_key >= end_key:
+                    break 
+                    
+                # Check 2: Only yield if key is within the desired range (inclusive start)
+                if current_key >= start_key:
+                    value = entry.get("value")
+                    # Yield the key and its value (which might be TOMBSTONE_VALUE)
+                    yield (current_key, value)
+                    
+        except IOError as e:
+            print(f"Error reading SSTable for range query {data_path}: {e}")
+        except msgpack.exceptions.UnpackException as e:
+            print(f"Warning: MessagePack unpack error during range scan in {data_path}: {e}")
+        finally:
+            if file_handle:
+                file_handle.close()
+
     def get_all_sstable_ids_from_disk(self) -> list[str]:
         """
         Scans the sstables_dir and returns a sorted list of SSTable IDs.

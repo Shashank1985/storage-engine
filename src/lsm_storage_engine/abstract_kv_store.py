@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import os
+from typing import Iterator,Tuple
 
 
 
@@ -56,6 +57,15 @@ class AbstractKVStore(ABC):
     @abstractmethod
     def exists(self, key: str) -> bool:
         """Checks if a key exists in the store."""
+        pass
+    
+    @abstractmethod
+    def range_query(self, start_key: str, end_key: str) -> Iterator[Tuple[str, str]]:
+        """
+        Retrieves all key-value pairs where start_key <= key < end_key, 
+        ensuring only the newest version of each key is returned.
+        Returns a generator for memory efficiency.
+        """
         pass
 
     @abstractmethod

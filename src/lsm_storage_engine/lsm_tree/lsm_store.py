@@ -4,6 +4,9 @@ import json
 import shutil 
 import threading
 import queue
+import heapq
+from typing import Iterator, Tuple
+
 
 from ..abstract_kv_store import AbstractKVStore
 from .wal import WriteAheadLog, TOMBSTONE 
@@ -194,6 +197,111 @@ class LSMTreeStore(AbstractKVStore):
                     return sstable_val # Return the actual value
         return None
 
+    def _memtable_range_iterator(self, start_key: str, end_key: str) -> Iterator[Tuple[str, str]]:
+        """
+        Generates a range iterator for the Memtable [start_key, end_key].
+        """
+        if self.memtable is None:
+            return
+            
+        # Find the starting index for the range in the sorted dict keys
+        start_idx = self.memtable._data.bisect_left(start_key) 
+        
+        for i in range(start_idx, len(self.memtable._data)):
+            key = self.memtable._data.iloc[i]
+            if key >= end_key:
+                break
+            value = self.memtable._data[key]
+            # Ensure internal TOMBSTONE object is yielded correctly as TOMBSTONE_VALUE string
+            value_to_yield = TOMBSTONE_VALUE if value is TOMBSTONE else value 
+            yield (key, value_to_yield)
+
+
+    def range_query(self, start_key: str, end_key: str) -> Iterator[Tuple[str, str]]:
+        """
+        Performs a k-way merge (Heap Merge Iterator) across all levels and the Memtable
+        to return all key-value pairs in a sorted range [start_key, end_key], 
+        ensuring only the newest version of each key is returned.
+        """
+        if self.memtable is None:
+             raise RuntimeError("LSMTreeStore is not properly loaded")
+
+        heap = []
+        source_id_counter = 0 # Used to differentiate iterators; lower ID means newer source/level
+
+        # --- 1. Sources: Memtable (Source ID 0 - Newest) ---
+        # The value is the iterator object itself
+        memtable_it = self._memtable_range_iterator(start_key, end_key)
+        try:
+            key, value = next(memtable_it)
+            # Heap entry structure: (key, source_id, value, iterator)
+            heapq.heappush(heap, (key, source_id_counter, value, memtable_it))
+        except StopIteration:
+            pass # Memtable is empty in this range
+        source_id_counter += 1
+
+        # --- 2. Sources: SSTables (Levels L0, L1, L2... L0 gets lower IDs) ---
+        
+        with self._level_lock:
+            for level_idx, sstable_ids_in_level in enumerate(self.levels):
+                # The source_id counter ensures that items from lower (newer) levels 
+                # are prioritized when keys are equal in the heap sort order.
+                for sstable_id in sstable_ids_in_level:
+                    # Optimization: Use metadata to check for key range overlap before opening file
+                    range_info = self.sstable_manager.get_sstable_key_range(sstable_id)
+                    if range_info:
+                        meta_min, meta_max = range_info
+                        # Skip if requested range [start_key, end_key) does NOT overlap with SSTable [meta_min, meta_max]
+                        # Overlap occurs if (start_key < meta_max) AND (end_key > meta_min)
+                        if start_key > meta_max or end_key <= meta_min:
+                             continue
+                    
+                    # Create the iterator for this SSTable
+                    sstable_it = self.sstable_manager.range_iterator(sstable_id, start_key, end_key)
+                    
+                    try:
+                        key, value = next(sstable_it)
+                        # Push to heap. The `source_id_counter` is the version differentiator.
+                        heapq.heappush(heap, (key, source_id_counter, value, sstable_it))
+                        source_id_counter += 1
+                    except StopIteration:
+                        # SSTable is empty in this range
+                        continue
+
+        # --- 3. The Merge Loop (Version Resolution) ---
+        last_key = None
+        latest_value = None
+        
+        while heap:
+            # key, source_id, value, iterator
+            key, _, value, iterator = heapq.heappop(heap)
+
+            # If this is the first key in the whole process, or if the key is new:
+            if key != last_key:
+                # If we finished processing the last key, yield the resolved value for it
+                if last_key is not None:
+                    # Yield the result for the last_key only if it wasn't a tombstone
+                    if latest_value != TOMBSTONE_VALUE and latest_value is not None:
+                        yield (last_key, latest_value)
+                
+                # Start tracking the new key
+                last_key = key
+                latest_value = value
+            # If key == last_key, we found an older version (because of the heap order). 
+            # We already have the newest version (the first one seen for this key), 
+            # so we simply ignore this entry and continue.
+
+            # Refill the heap from the iterator we just used
+            try:
+                next_key, next_value = next(iterator)
+                heapq.heappush(heap, (next_key, source_id_counter, next_value, iterator))
+            except StopIteration:
+                pass # This source is exhausted
+
+        # --- 4. Final Key Yield ---
+        # Yield the very last key processed
+        if last_key is not None and latest_value != TOMBSTONE_VALUE and latest_value is not None:
+             yield (last_key, latest_value)
 
     def exists(self, key: str) -> bool:
         return self.get(key) is not None
