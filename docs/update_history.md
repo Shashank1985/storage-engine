@@ -25,5 +25,8 @@ Added a close command to close the active collection and use a new one, if by ac
 ## 14 Oct 2025, version 1.2.0 
 * Migrated storage engine to client-server architecture. Storage engine functionality works behind a lightweight FastAPI server and uses REST APIs to communicate.
 
-## 15 Oct 2025, version 1.2.2 (latest version)
+## 15 Oct 2025, version 1.2.2 
 * Migrated sstables storage from json files to msgpack binary format.
+
+## 16 Oct 2025, version 1.2.3
+* Added functionality for supporting range queries, where users can simply select the start_key and end_key and the system will retrieve the most latest keys that lie within the range.
