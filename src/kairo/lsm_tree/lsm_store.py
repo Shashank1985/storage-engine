@@ -62,8 +62,6 @@ class LSMTreeStore(AbstractKVStore):
             "compaction_ratio", self.COMPACTION_RATIO_T
         )
         self._key_count: int = 0
-        # load() will be called by StorageManager after instantiation.
-        # If it were called here, and load() failed, the object might be in an inconsistent state.
 
     def _get_meta_file_path(self) -> str: 
         """Gets the path to the collection's metadata file."""

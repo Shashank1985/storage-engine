@@ -1,4 +1,4 @@
-# **Simple Python Storage Engine**
+# **KAIRO**
 Light weight key value storage engine optimized for write heavy workloads.
 
 ## Overview

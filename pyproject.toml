@@ -5,7 +5,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lsm-storage-engine-key-value-store" 
+name = "kairo" 
 version = "1.2.3"
 authors = [
   { name="Shashank", email="shashankshashidhar73@gmail.com" },
@@ -37,5 +37,5 @@ Issues = "https://github.com/Shashank1985/storage-engine/issues"
 
 # This section creates the command-line tool and starts the server.
 [project.scripts]
-lsm-cli = "lsm_storage_engine.cli:main"
-lsm-server = "lsm_storage_engine.server:run_server"
+lsm-cli = "kairo.cli:main"
+lsm-server = "kairo.server:run_server"

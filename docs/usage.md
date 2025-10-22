@@ -1,16 +1,17 @@
 # Usage Guide
 
 ## How to install?
-pip install lsm_storage_engine_key_value_store
-
+```bash
+pip install kairo
+```
 ## How to use?
-As of current release, **1.1.0**, the package can be used both as a CLI tool and as a library. 
+As of current release, **1.2.3**, the package can be used both as a CLI tool and as a library. 
 
 # Usage as Library:
 Released as a part of v0.3.0
 
 ```python
-from lsm_storage_engine import StorageManager
+from kairo import StorageManager
 storage = StorageManager(base_data_path=DATA_DIRECTORY)
 
 try:
