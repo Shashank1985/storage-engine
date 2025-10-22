@@ -37,5 +37,5 @@ Issues = "https://github.com/Shashank1985/storage-engine/issues"
 
 # This section creates the command-line tool and starts the server.
 [project.scripts]
-lsm-cli = "bloomkv.cli:main"
-lsm-server = "bloomkv.server:run_server"
+bloomkv-cli = "bloomkv.cli:main"
+bloomkv-server = "bloomkv.server:run_server"

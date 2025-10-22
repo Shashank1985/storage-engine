@@ -41,7 +41,7 @@ You will require 2 seperate terminals.
 
 Run this command on one terminal to start the server
 ```
-lsm-server
+bloomkv-server
 ```
 * **Default Behaviour**: The server starts on http://127.0.0.1:8000.
 * **Data Path**:  It stores all collection data in a directory (default: lsm_server_data in the current working directory).
@@ -49,7 +49,7 @@ lsm-server
 
 Run this command on another terminal to start the client cli tool
 ```
-lsm-cli
+bloomkv-cli
 ```
 This will first connect to the server and then print the cli help. Follow the instructions given in the cli help.
 

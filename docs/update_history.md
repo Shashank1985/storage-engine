@@ -30,3 +30,6 @@ Added a close command to close the active collection and use a new one, if by ac
 
 ## 16 Oct 2025, version 1.2.3
 * Added functionality for supporting range queries, where users can simply select the start_key and end_key and the system will retrieve the most latest keys that lie within the range.
+
+## 22 Oct 2025, version 1.2.6
+* New name, welcome to BloomKV!
