@@ -5,8 +5,8 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kairo" 
-version = "1.2.4"
+name = "bloomkv" 
+version = "1.2.5"
 authors = [
   { name="Shashank", email="shashankshashidhar73@gmail.com" },
 ]
@@ -37,5 +37,5 @@ Issues = "https://github.com/Shashank1985/storage-engine/issues"
 
 # This section creates the command-line tool and starts the server.
 [project.scripts]
-lsm-cli = "kairo.cli:main"
-lsm-server = "kairo.server:run_server"
+lsm-cli = "bloomkv.cli:main"
+lsm-server = "bloomkv.server:run_server"

@@ -1,4 +1,4 @@
-# **KAIRO**
+# **BloomKV**
 Light weight key value storage engine optimized for write heavy workloads.
 
 ## Overview

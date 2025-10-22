@@ -2,7 +2,7 @@
 
 ## How to install?
 ```bash
-pip install kairo
+pip install bloomkv
 ```
 ## How to use?
 As of current release, **1.2.3**, the package can be used both as a CLI tool and as a library. 
@@ -11,7 +11,7 @@ As of current release, **1.2.3**, the package can be used both as a CLI tool and
 Released as a part of v0.3.0
 
 ```python
-from kairo import StorageManager
+from bloomkv import StorageManager
 storage = StorageManager(base_data_path=DATA_DIRECTORY)
 
 try:
