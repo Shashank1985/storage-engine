@@ -8,36 +8,21 @@ from typing import Optional
 SERVER_URL = os.environ.get("LSM_SERVER_URL", "http://127.0.0.1:8000")
 
 LSM_LOGO = """
- ___        ________  ___      ___                      
-|"  |      /"       )|"  \    /"  |                     
-||  |     (:   \___/  \   \  //   |                     
-|:  |      \___  \    /\\  \/.    |                     
- \  |___    __/  \\  |: \.        |                     
-( \_|:  \  /" \   :) |.  \    /:  |                     
- \_______)(_______/  |___|\__/|___|                     
-                                                        
- __   ___  ___      ___                                 
-|/"| /  ")|"  \    /"  |                                
-(: |/   /  \   \  //  /                                 
-|    __/    \\  \/. ./                                  
-(// _  \     \.    //                                   
-|: | \  \     \\   /                                    
-(__|  \__)     \__/                                     
-                                                        
-  ________  ___________  ______     _______    _______  
- /"       )("     _   ")/    " \   /"      \  /"     "| 
-(:   \___/  )__/  \\__/// ____  \ |:        |(: ______) 
- \___  \       \\_ /  /  /    ) :)|_____/   ) \/    |   
-  __/  \\      |.  | (: (____/ //  //      /  // ___)_  
- /" \   :)     \:  |  \        /  |:  __   \ (:      "| 
-(_______/       \__|   \"_____/   |__|  \___) \_______) 
+ _______   ___        ______      ______   ___      ___  __   ___  ___      ___ 
+|   _  "\ |"  |      /    " \    /    " \ |"  \    /"  ||/"| /  ")|"  \    /"  |
+(. |_)  :)||  |     // ____  \  // ____  \ \   \  //   |(: |/   /  \   \  //  / 
+|:     \/ |:  |    /  /    ) :)/  /    ) :)/\\  \/.    ||    __/    \\  \/. ./  
+(|  _  \\  \  |___(: (____/ //(: (____/ //|: \.        |(// _  \     \.    //   
+|: |_)  :)( \_|:  \\        /  \        / |.  \    /:  ||: | \  \     \\   /    
+(_______/  \_______)\"_____/    \"_____/  |___|\__/|___|(__|  \__)     \__/     
+                                                                                
                                                         
 """
 
 
 def print_cli_help():
     """Prints the list of available commands."""
-    print("\nLSM Storage Engine CLI - Available Commands:")
+    print("\n BloomKV CLI - Available Commands:")
     print("  CREATE <name> [lsmtree] [description]  - Create a new collection (on server).")
     print("  USE <name>                     - Set an existing collection as active (on server).")
     print("  LIST                           - List all available collections.")
@@ -99,9 +84,9 @@ def get_active_collection_name() -> str | None:
 
 def main():
     print(LSM_LOGO)
-    print(f"LSM Client initialized. Connecting to server at: {SERVER_URL}")
+    print(f"BloomKV Client initialized. Connecting to server at: {SERVER_URL}")
     print("======================================================================================")
-    print("REMINDER: Ensure the server is running via 'lsm-server' in a separate terminal.")
+    print("REMINDER: Ensure the server is running via 'bloomkv-server' in a separate terminal.")
     print_cli_help()
 
     while True:
