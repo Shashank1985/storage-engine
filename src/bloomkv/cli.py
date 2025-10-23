@@ -164,9 +164,14 @@ def main():
                 if not collections:
                     print("No collections found on disk.")
                 else:
-                    print("Available collections (name, type):")
-                    for name, type_ in collections:
-                        print(f"  - {name} ({type_})")
+                    print("Available collections (name, type,description):")
+                    for collection_meta in collections:
+                        name = collection_meta.get("name", "N/A")
+                        type_ = collection_meta.get("type", "lsmtree")
+                        # Safely retrieve the description
+                        description = collection_meta.get("description", "No description provided")
+                        
+                        print(f"  - {name} ({type_}) | {description}")
 
         elif command == "ACTIVE":
             if active_coll_name:

@@ -49,7 +49,7 @@ def run_server():
     """Entry point for the 'bloomkv-server' command."""
     print(f"LSM Server starting. Data path: {DATA_PATH}")
     # The database will load existing collections on-demand via USE
-    uvicorn.run(app, host="127.0.0.1", port=SERVER_PORT)
+    uvicorn.run(app, host="0.0.0.0", port=SERVER_PORT)
 
 # --- Helper Functions ---
 
