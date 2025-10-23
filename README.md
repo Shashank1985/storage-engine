@@ -13,6 +13,7 @@ It is a persistent key-value store featuring:
 * Bloom filter functionality to prevent unnecessary disk operations for keys that we know dont exist in the collection
 * Storage engine is behind a FastAPI server and can be communicated with using REST APIs.
 * Supports range queries from start_key to end_key
+* Can be used as an importable library for programmatic integration
 
 ## Getting Started
 * Detailed documentation and explanation of each component is available in the docs folder.
