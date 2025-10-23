@@ -130,23 +130,31 @@ class StorageManager:
             return active_instance
         return None
 
-    def list_collections_on_disk(self) -> list[tuple[str, str]]:
-        """Lists collections found in the base_data_path."""
-        found_collections = []
+    def list_collections_on_disk(self) -> list[dict]:
+        """Lists collections found in the base_data_path and returns their full metadata."""
+        found_collections: list[dict] = []
         if not os.path.exists(self.base_data_path):
             return found_collections
             
         for item_name in os.listdir(self.base_data_path):
             item_path = os.path.join(self.base_data_path, item_name)
             meta_file = os.path.join(item_path, self.ENGINE_META_FILE)
+            
             if os.path.isdir(item_path) and os.path.exists(meta_file):
                 try:
                     with open(meta_file, 'r') as f:
                         meta_data = json.load(f)
-                        engine_type = meta_data.get("type", "unknown")
-                        found_collections.append((item_name, engine_type))
+                        if "name" not in meta_data:
+                            meta_data["name"] = item_name 
+                        
+                        found_collections.append(meta_data) 
+                        
                 except (IOError, json.JSONDecodeError):
-                    found_collections.append((item_name, "error_reading_meta"))
+                    found_collections.append({
+                        "name": item_name, 
+                        "type": "unknown", 
+                        "status": "error_reading_meta"
+                    })
         return found_collections
 
     def close_collection(self, name: str) -> bool:

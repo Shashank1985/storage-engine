@@ -67,8 +67,8 @@ def send_request(method: str, endpoint: str, data: Optional[dict] = None) -> Opt
         return response
     
     except requests.exceptions.ConnectionError:
-        print(f"\nCRITICAL: Connection failed. Is the LSM server running at {SERVER_URL}?")
-        print("Please start the server first using 'lsm-server'.")
+        print(f"\nCRITICAL: Connection failed. Is the BloomKV server running at {SERVER_URL}?")
+        print("Please start the server first using 'BloomKV-server'.")
         sys.exit(1)
     except Exception as e:
         print(f"An unexpected client error occurred: {type(e).__name__}: {e}")
@@ -280,7 +280,7 @@ def main():
                     print(f"Raw received data snippet: {full_json_text[:200]}...")
                 
             except requests.exceptions.ConnectionError:
-                print(f"\nCRITICAL: Connection failed. Is the LSM server running at {SERVER_URL}?")
+                print(f"\nCRITICAL: Connection failed. Is the Bloomkv server running at {SERVER_URL}?")
                 sys.exit(1)
             except Exception as e:
                 print(f"An unexpected client error occurred during RANGE query: {type(e).__name__}: {e}") 

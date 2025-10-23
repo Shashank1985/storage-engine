@@ -12,11 +12,11 @@ from .storage_manager import (
     CollectionNotFoundError, 
     StorageError
 )
-DATA_PATH = os.environ.get("LSM_DATA_PATH", os.path.join(os.getcwd(), "lsm_server_data"))
-SERVER_PORT = int(os.environ.get("LSM_SERVER_PORT", 8000))
+DATA_PATH = os.environ.get("BLOOMKV_DATA_PATH", os.path.join(os.getcwd(), "bloomkv_server_data"))
+SERVER_PORT = int(os.environ.get("BLOOMKV_SERVER_PORT", 8000))
 
 SERVER_MANAGER = StorageManager(base_data_path=DATA_PATH)
-app = FastAPI(title="LSM Storage Engine Server", version="1.1.1")
+app = FastAPI(title="BloomKV Server", version="1.1.1")
 
 # --- Pydantic Schemas for Request Bodies ---
 # These structures help validate incoming client data
@@ -46,7 +46,7 @@ def shutdown_event():
 
 
 def run_server():
-    """Entry point for the 'lsm-server' command."""
+    """Entry point for the 'bloomkv-server' command."""
     print(f"LSM Server starting. Data path: {DATA_PATH}")
     # The database will load existing collections on-demand via USE
     uvicorn.run(app, host="127.0.0.1", port=SERVER_PORT)
