@@ -33,3 +33,7 @@ Added a close command to close the active collection and use a new one, if by ac
 
 ## 22 Oct 2025, version 1.2.6
 * New name, welcome to BloomKV!
+
+## 23 Oct 2025, version 1.2.8
+* Migration from requests to httpx for client side requests to the FastAPI server
+* Docker image created

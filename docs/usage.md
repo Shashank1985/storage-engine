@@ -9,31 +9,7 @@ As of current release, **1.2.3**, the package can be used both as a CLI tool and
 
 # Usage as Library:
 Released as a part of v0.3.0
-
-```python
-from bloomkv import StorageManager
-storage = StorageManager(base_data_path=DATA_DIRECTORY)
-
-try:
-    # Create and use a collection
-    storage.create_collection("products",description = "Test description")
-    storage.use_collection("products")
-
-    # Get the active collection object
-    products_store = storage.get_active_collection()
-
-    # Put and get data
-    products_store.put("prod:456", "{'name': 'Super Widget', 'price': 99.99}")
-    product = products_store.get("prod:456")
-
-    print(f"Retrieved: {product}")
-
-except CollectionExistsError as e:
-    print(f"Error: {e}")
-finally:
-    # Close all file handles gracefully
-    storage.close_all()
-```
+please check storage-engine/bloomkv-test.py file for the usage
 
 # Usage as CLI
 You will require 2 seperate terminals.
