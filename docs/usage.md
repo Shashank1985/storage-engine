@@ -9,13 +9,13 @@ You can also pull and run the docker image of the server
 ```bash
 docker run -d -p 8000:8000 -v /local/data/path:/app/bloomkv_server_data --name bloomkv sensei0410/bloomkv:1.2.8
 ```
-Running this command will start the bloomkv server 
+Running this command will start the bloomkv server in a docker container
 ## How to use?
 As of current release, **1.2.3**, the package can be used both as a CLI tool and as a library. 
 
 # Usage as Library:
 Released as a part of v0.3.0
-please check storage-engine/bloomkv-test.py file for the usage
+please check storage-engine/bloomkv-test.py file for the usage as a library and how to integrate it into your project
 
 # Usage as CLI
 You will require 2 seperate terminals.
