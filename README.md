@@ -16,7 +16,7 @@ It is a persistent key-value store featuring:
 * Can be used as an importable library for programmatic integration
 
 ## Getting Started
-* Detailed documentation and explanation of each component is available in the docs folder.
+* Detailed documentation, usage and explanation of each component is available in the docs folder.
 
 ## Contributing
 Contributions, issues and feature requests are welcome!

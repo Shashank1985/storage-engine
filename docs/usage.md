@@ -4,6 +4,12 @@
 ```bash
 pip install bloomkv
 ```
+
+You can also pull and run the docker image of the server
+```bash
+docker run -d -p 8000:8000 -v /local/data/path:/app/bloomkv_server_data --name bloomkv sensei0410/bloomkv:1.2.8
+```
+Running this command will start the bloomkv server 
 ## How to use?
 As of current release, **1.2.3**, the package can be used both as a CLI tool and as a library. 
 
