@@ -1,5 +1,4 @@
-# simple_storage_engine/main.py
-import requests
+import httpx
 import json
 import os
 import sys
@@ -38,42 +37,46 @@ def print_cli_help():
     print("  EXIT                           - Exit the application.")
     print()
 
-def send_request(method: str, endpoint: str, data: Optional[dict] = None) -> Optional[requests.Response]:
+try:
+    HTTPX_CLIENT = httpx.Client(base_url=SERVER_URL)
+except Exception as e:
+    # Handle environment or configuration errors if necessary
+    print(f"Error initializing HTTPX client: {e}")
+    sys.exit(1)
+
+def send_request(method: str, endpoint: str, data: Optional[dict] = None) -> Optional[httpx.Response]:
     """
-    Helper function to send HTTP requests and handle connection/HTTP errors gracefully.
+    Helper function to send HTTP requests using the global HTTPX_CLIENT.
     """
     url = f"{SERVER_URL}{endpoint}"
     
     try:
         if method == "GET":
-            response = requests.get(url)
+            response = HTTPX_CLIENT.get(url)
         elif method == "POST":
-            response = requests.post(url, json=data)
+            response = HTTPX_CLIENT.post(url, json=data)
         else:
             print(f"Client Error: Unsupported method '{method}' for network communication.")
             return None
         
         # Check for 4xx or 5xx responses
-        if not response.ok:
+        if response.is_error:
             try:
-                # Attempt to extract detailed error message from FastAPI
                 error_detail = response.json().get('detail', f"HTTP Error: {response.status_code}")
             except:
-                # Fallback to raw text if JSON parsing fails
                 error_detail = response.text.strip()
             print(f"Server Error ({response.status_code}): {error_detail}")
-            return None # Indicate failure to the calling function
+            return None
             
         return response
     
-    except requests.exceptions.ConnectionError:
+    except httpx.ConnectError:
         print(f"\nCRITICAL: Connection failed. Is the BloomKV server running at {SERVER_URL}?")
         print("Please start the server first using 'BloomKV-server'.")
         sys.exit(1)
     except Exception as e:
         print(f"An unexpected client error occurred: {type(e).__name__}: {e}")
         return None
-
 
 def get_active_collection_name() -> str | None:
     """Fetches the active collection name from the server to update the prompt."""
@@ -253,14 +256,15 @@ def main():
             
             # The server streams the JSON response, so we need a special way to read it.
             try:
-                response = requests.get(f"{SERVER_URL}{endpoint}", stream=True)
-                if not response.ok:
-                    try:
-                        error_detail = response.json().get('detail', f"HTTP Error: {response.status_code}")
-                    except:
-                        error_detail = response.text.strip()
-                    print(f"Server Error ({response.status_code}): {error_detail}")
-                    continue
+                with HTTPX_CLIENT.stream("GET", endpoint) as response:
+                    # Check for server error immediately
+                    if response.is_error:
+                         try:
+                            error_detail = response.json().get('detail', f"HTTP Error: {response.status_code}")
+                         except:
+                            error_detail = response.text.strip()
+                         print(f"Server Error ({response.status_code}): {error_detail}")
+                         continue
 
                 # Read and parse the streamed JSON
                 print(f"\n--- Range Query: ['{start_key}' to '{end_key}'] ---")
@@ -284,7 +288,7 @@ def main():
                     print("\nError: Could not decode complete JSON response (possible partial stream or server error).")
                     print(f"Raw received data snippet: {full_json_text[:200]}...")
                 
-            except requests.exceptions.ConnectionError:
+            except httpx.ConnectError:
                 print(f"\nCRITICAL: Connection failed. Is the Bloomkv server running at {SERVER_URL}?")
                 sys.exit(1)
             except Exception as e:

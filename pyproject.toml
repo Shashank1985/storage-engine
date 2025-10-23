@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bloomkv" 
-version = "1.2.7"
+version = "1.2.8"
 authors = [
   { name="Shashank", email="shashankshashidhar73@gmail.com" },
 ]
@@ -28,7 +28,7 @@ dependencies = ["sortedcontainers",
                 "mmh3",
                 "fastapi",
                 "uvicorn",
-                "requests",
+                "httpx",
                 "msgpack"]
 
 [project.urls]
