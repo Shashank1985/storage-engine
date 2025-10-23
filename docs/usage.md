@@ -11,7 +11,7 @@ As of current release, **1.2.3**, the package can be used both as a CLI tool and
 
 # Usage as Library:
 Released as a part of v0.3.0
-please check storage-engine/bloomkv-test.py file for the usage
+please check storage-engine/bloomkv-test.py file for the usage as a library and how to integrate it into your project
 
 # Usage as CLI
 You will require 2 seperate terminals.
