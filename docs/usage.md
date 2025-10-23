@@ -4,12 +4,8 @@
 ```bash
 pip install bloomkv
 ```
+This command installs the cli tool and the library as a whole
 
-You can also pull and run the docker image of the server
-```bash
-docker run -d -p 8000:8000 -v /local/data/path:/app/bloomkv_server_data --name bloomkv sensei0410/bloomkv:1.2.8
-```
-Running this command will start the bloomkv server 
 ## How to use?
 As of current release, **1.2.3**, the package can be used both as a CLI tool and as a library. 
 
@@ -20,7 +16,6 @@ please check storage-engine/bloomkv-test.py file for the usage
 # Usage as CLI
 You will require 2 seperate terminals.
 
-
 Run this command on one terminal to start the server
 ```
 bloomkv-server
@@ -29,11 +24,18 @@ bloomkv-server
 * **Data Path**:  It stores all collection data in a directory (default: lsm_server_data in the current working directory).
 * **Graceful Shutdown**: On shutdown (e.g., via Ctrl+C), the server ensures all active collections are gracefully closed and flushed to disk.
 
+## Run as Docker container
+You can also pull and run the docker image of the server
+```bash
+docker run -d -p 8000:8000 -v /local/data/path:/app/bloomkv_server_data --name bloomkv sensei0410/bloomkv:1.2.8
+```
+Running this command will start the bloomkv server in a docker container and you will be ready to connect to the server from the CLI. Please ensure to change /local/data/path to the directory where you want the server data to be stored. This directory will be persisted even after the container is shut down.
+
 Run this command on another terminal to start the client cli tool
 ```
 bloomkv-cli
 ```
-This will first connect to the server and then print the cli help. Follow the instructions given in the cli help.
+This will first connect to the server and then print the cli help. If you have the server running in a docker container, the client will connect to the container. Follow the instructions given in the cli help.
 
 # General Rules
 1. Create a collection, be sure to give a good description of the collection
