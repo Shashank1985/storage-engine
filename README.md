@@ -14,6 +14,7 @@ It is a persistent key-value store featuring:
 * Storage engine is behind a FastAPI server and can be communicated with using REST APIs.
 * Supports range queries from start_key to end_key
 * Can be used as an importable library for programmatic integration
+* Import csv files and store them as kv pairs in a collection
 
 ## Getting Started
 * Detailed documentation, usage and explanation of each component is available in the docs folder.
