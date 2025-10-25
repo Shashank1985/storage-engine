@@ -91,7 +91,9 @@ class AbstractKVStore(ABC):
         key_columns: List[str], 
         value_columns: List[str], 
         csv_delimiter: str = ",",
-        key_separator: str = "\x00"
+        key_separator: str = "\x00",
+        chunk_size: int = 100000,
+        max_workers: int = 8
     ) -> int:
         """
         Bulk imports data from a CSV file into the store.
@@ -102,6 +104,8 @@ class AbstractKVStore(ABC):
             value_columns (List[str]): List of column names to store in the serialized value.
             csv_delimiter (str): The delimiter used in the CSV file.
             key_separator (str): The internal character used to join key columns.
+            chunk_size (int): Max size of a chunk, which is created for very large csv files.
+            max_workers (int): Thread pool to handle concurrent I/O operations(writing sstables)
             
         Returns:
             int: The number of key-value pairs successfully imported.

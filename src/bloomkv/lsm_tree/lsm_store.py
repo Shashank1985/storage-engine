@@ -8,6 +8,7 @@ import heapq
 from typing import Iterator, Tuple,List,Dict,Any
 import csv
 import msgpack
+import concurrent.futures
 
 from ..abstract_kv_store import AbstractKVStore
 from .wal import WriteAheadLog, TOMBSTONE 
@@ -64,18 +65,25 @@ class LSMTreeStore(AbstractKVStore):
         )
         self._key_count: int = 0
 
-    def _process_and_write_chunk(self, chunk_data: List[Tuple[str, bytes]]) -> str:
-        """Helper to sort a chunk and write it to a single SSTable."""
-        chunk_data.sort(key=lambda x: x[0]) 
-
+    def _process_and_write_chunk(self, chunk_data: List[Tuple[str, bytes]], sstable_id: str) -> str:
+        """
+        Helper executed by the ThreadPoolExecutor to write a single sorted chunk 
+        to a set of SSTable files.
+        """
         if not chunk_data:
             raise ValueError("Attempted to process an empty chunk.")
-        sstable_id = self._generate_sstable_id()
-        
-        if not self.sstable_manager.write_sstable(sstable_id, chunk_data):
-            raise IOError(f"Failed to write SSTable for chunk {sstable_id}.")
 
-        return sstable_id
+        # 2. Write SSTable
+        try:
+            if not self.sstable_manager.write_sstable(sstable_id, chunk_data):
+                raise IOError(f"Write operation returned False for SSTable {sstable_id}.")
+            return sstable_id
+        except IOError as e:
+            # If the write fails, attempt to clean up any partial files immediately
+            self.sstable_manager.delete_sstable_files(sstable_id)
+            # Re-raise to signal failure to the ThreadPoolExecutor
+            raise IOError(f"Failed to write SSTable for chunk {sstable_id}: {e}")
+        
     def _get_meta_file_path(self) -> str: 
         """Gets the path to the collection's metadata file."""
         return os.path.join(self.collection_path, self.ENGINE_META_FILE)
@@ -485,39 +493,41 @@ class LSMTreeStore(AbstractKVStore):
             raise IOError(f"CRITICAL: SSTable merge failed during L{level_idx} compaction.")
 
 
-    def _commit_sstables_and_meta(self, new_sstable_id: str, row_count: int, csv_metadata: Dict[str, Any]) -> None:
+    def _commit_sstables_and_meta(self, new_sstable_ids: List[str], row_count: int, csv_metadata: Dict[str, Any]) -> None:
         """
-        Atomically adds a newly created SSTable to L0, updates MANIFEST,
+        Atomically adds newly created SSTables to L0, updates MANIFEST,
         and updates the collection's core metadata with key count and CSV schema.
         """
-        
+    
         #update levels and manifest
         with self._level_lock:
             if not self.levels:
                 self.levels.append([])
             
-            # Add to L0. The newest L0 sstables are at the end.
-            self.levels[0].append(new_sstable_id) 
+            # Add ALL new IDs to L0
+            self.levels[0].extend(new_sstable_ids) 
             
             try:
                 self._write_manifest()
             except IOError as e:
-                # Rollback: Remove ID from in-memory state if commit fails
-                self.levels[0].remove(new_sstable_id)
+                # Rollback: Remove all IDs from in-memory state if commit fails
+                for sstable_id in new_sstable_ids:
+                    if sstable_id in self.levels[0]:
+                        self.levels[0].remove(sstable_id)
                 # CRITICAL: Delete the physical files to prevent orphaned data
-                self.sstable_manager.delete_sstable_files(new_sstable_id) 
+                for sstable_id in new_sstable_ids:
+                    self.sstable_manager.delete_sstable_files(sstable_id) 
                 raise IOError(f"CRITICAL: Failed to write MANIFEST after bulk SSTable creation. Import aborted. {e}")
 
-        # 2. Update Collection Metadata (Including new CSV Schema)
+        #update collection metadata with kv count and csv_schema
         self._key_count += row_count
         
         meta_file_path = self._get_meta_file_path()
         try:
             with open(meta_file_path, 'r', encoding='utf-8') as f:
                 meta_data = json.load(f)
-            #update the kv pair count
+            
             meta_data["kv_pair_count"] = self._key_count
-            # Store the new, required CSV schema for export
             meta_data["csv_schema"] = csv_metadata 
             
             with open(meta_file_path, 'w', encoding='utf-8') as f:
@@ -525,7 +535,8 @@ class LSMTreeStore(AbstractKVStore):
                 
         except Exception as e:
             print(f"Warning: Failed to update metadata file {meta_file_path} after successful import. Key count may be stale. {e}")
-    
+
+
     def import_csv(
     self, 
     csv_file_path: str, 
@@ -533,74 +544,96 @@ class LSMTreeStore(AbstractKVStore):
     value_columns: List[str], 
     csv_delimiter: str = ",",
     key_separator: str = "\x00",
-    chunk_size: int = 100000 # Default to 100,000 rows as a memory heuristic
+    chunk_size: int = 100000, 
+    max_workers: int = 8
 ) -> int:
+        """Bulk imports a CSV file in chunks using a thread pool for concurrent SSTable writes."""
         
-        """Bulk imports a CSV file in chunks, creating multiple L0 SSTables if necessary."""
-    
         if not os.path.exists(csv_file_path):
             raise FileNotFoundError(f"CSV file not found at path: {csv_file_path}")
 
-        new_sstable_ids = []
+        futures = {} # Maps Future object -> sstable_id
         total_rows_imported = 0
         
-        # The try/except block encompasses the entire file reading and writing process 
-        # to ensure atomic rollback if any chunk fails.
         try:
-            with open(csv_file_path, 'r', newline='', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile, delimiter=csv_delimiter)
-                
-                #column validation
-                required_cols = set(key_columns) | set(value_columns)
-                missing_cols = required_cols - set(reader.fieldnames)
-                if missing_cols:
-                    raise ValueError(f"CSV header missing required columns: {missing_cols}")
-                
-                current_chunk = []
-                
-                #go through each row for in memory chunking in case of large csv file
-                for row in reader:
-                    #Row formatting into kv piar
-                    key_parts = [row[col] for col in key_columns]
-                    key_string = key_separator.join(key_parts)
-                    value_dict = {col: row[col] for col in value_columns}
-                    value_binary = msgpack.packb(value_dict)
-                    current_chunk.append((key_string, value_binary))
+            #Concurrent Thread Pool
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                with open(csv_file_path, 'r', newline='', encoding='utf-8') as csvfile:
+                    reader = csv.DictReader(csvfile, delimiter=csv_delimiter)
                     
-                    #check chunk size and flush if greater
-                    if len(current_chunk) >= chunk_size:
-                        # Write the chunk and track the new SSTable ID
-                        sstable_id = self._process_and_write_chunk(current_chunk)
-                        new_sstable_ids.append(sstable_id)
+                    #Data transformation step
+                    required_cols = set(key_columns) | set(value_columns)
+                    missing_cols = required_cols - set(reader.fieldnames)
+                    if missing_cols:
+                        raise ValueError(f"CSV header missing required columns: {missing_cols}")
+                    
+                    current_chunk = []
+                    
+                    #Create chunks by going through each row
+                    for row in reader:
+                        #Transform Row (Key/MsgPack Value generation)
+                        key_parts = [row.get(col, '') for col in key_columns] # Use .get for robustness
+                        key_string = key_separator.join(key_parts)
+                        value_dict = {col: row.get(col, '') for col in value_columns}
+                        value_binary = msgpack.packb(value_dict)
+                        current_chunk.append((key_string, value_binary))
+
+                        if len(current_chunk) >= chunk_size:
+                            
+                            # CRITICAL: Sort the chunk on the main thread (CPU-bound)
+                            current_chunk.sort(key=lambda x: x[0]) 
+                            
+                            # Generate ID on the main thread and submit
+                            sstable_id = self._generate_sstable_id()
+                            future = executor.submit(self._process_and_write_chunk, current_chunk, sstable_id)
+                            futures[future] = sstable_id # Track ID for rollback
+                            
+                            total_rows_imported += len(current_chunk)
+                            current_chunk = []
+                            
+                    #final chunk handling
+                    if current_chunk:
+                        current_chunk.sort(key=lambda x: x[0])
+                        sstable_id = self._generate_sstable_id()
+                        future = executor.submit(self._process_and_write_chunk, current_chunk, sstable_id)
+                        futures[future] = sstable_id
                         total_rows_imported += len(current_chunk)
                         
-                        # Reset the chunk for the next batch
-                        current_chunk = []
-                        
-                # final chunk processing
-                if current_chunk:
-                    sstable_id = self._process_and_write_chunk(current_chunk)
-                    new_sstable_ids.append(sstable_id)
-                    total_rows_imported += len(current_chunk)
+                
+                #Barrier for threadpool
+                new_sstable_ids = []
+                
+                for future in concurrent.futures.as_completed(futures):
+                    sstable_id = futures[future]
+                    try:
+                        future.result() 
+                        new_sstable_ids.append(sstable_id)
+                    except Exception as e:
+                        # Failure in one thread signals the failure of the entire import
+                        raise RuntimeError(f"Concurrent SSTable write failed for ID {sstable_id}: {e}")
 
         except Exception as e:
-            # CRITICAL FAILURE HANDLING (Rollback)
-            # Delete any successfully written SSTables from this *attempt*
-            for sstable_id in new_sstable_ids:
-                self.sstable_manager.delete_sstable_files(sstable_id)
-            raise RuntimeError(f"Bulk CSV import failed during processing. Rolled back {len(new_sstable_ids)} SSTables. Error: {e}")
+            # --- 5. CRITICAL FAILURE HANDLING (Rollback) ---
             
-        #Commiting to manifest with metadata, useful for exporting
+            # Identify files that successfully completed their writes before the failure
+            successfully_written_ids = [s_id for f, s_id in futures.items() if f.done() and not f.exception()]
+            
+            # Delete those successful files to maintain atomicity (0% or 100% commit)
+            for sstable_id in successfully_written_ids:
+                self.sstable_manager.delete_sstable_files(sstable_id)
+                
+            raise RuntimeError(f"Bulk CSV import failed. Rolled back {len(successfully_written_ids)} SSTables. Root error: {e}")
+            
+        #metadata update
         if new_sstable_ids:
             csv_meta = {
                 "key_columns": key_columns,
                 "value_columns": value_columns,
                 "key_separator": key_separator
             }
-            # Commit all new SSTable IDs and update collection metadata atomically
             self._commit_sstables_and_meta(new_sstable_ids, total_rows_imported, csv_meta)
             
-            # Trigger compaction check as multiple new L0 files may exceed the threshold (default 4)
+            # Trigger compaction check
             if self._compaction_thread and self._compaction_thread.is_alive():
                 self._compaction_queue.put(("FLUSH_COMPLETE", 0))
 
