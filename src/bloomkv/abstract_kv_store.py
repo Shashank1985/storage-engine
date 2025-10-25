@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import os
-from typing import Iterator,Tuple
+from typing import Iterator,Tuple,List
 
 
 
@@ -81,5 +81,29 @@ class AbstractKVStore(ABC):
         """
         Performs any necessary cleanup, like flushing data to disk.
         Called when the storage engine is shutting down.
+        """
+        pass
+
+    @abstractmethod
+    def import_csv(
+        self, 
+        csv_file_path: str, 
+        key_columns: List[str], 
+        value_columns: List[str], 
+        csv_delimiter: str = ",",
+        key_separator: str = "\x00"
+    ) -> int:
+        """
+        Bulk imports data from a CSV file into the store.
+        
+        Args:
+            csv_file_path (str): Path to the CSV file.
+            key_columns (List[str]): List of column names to use for key construction.
+            value_columns (List[str]): List of column names to store in the serialized value.
+            csv_delimiter (str): The delimiter used in the CSV file.
+            key_separator (str): The internal character used to join key columns.
+            
+        Returns:
+            int: The number of key-value pairs successfully imported.
         """
         pass

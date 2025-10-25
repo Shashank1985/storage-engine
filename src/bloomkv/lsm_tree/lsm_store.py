@@ -5,8 +5,9 @@ import shutil
 import threading
 import queue
 import heapq
-from typing import Iterator, Tuple
-
+from typing import Iterator, Tuple,List,Dict,Any
+import csv
+import msgpack
 
 from ..abstract_kv_store import AbstractKVStore
 from .wal import WriteAheadLog, TOMBSTONE 
@@ -63,6 +64,18 @@ class LSMTreeStore(AbstractKVStore):
         )
         self._key_count: int = 0
 
+    def _process_and_write_chunk(self, chunk_data: List[Tuple[str, bytes]]) -> str:
+        """Helper to sort a chunk and write it to a single SSTable."""
+        chunk_data.sort(key=lambda x: x[0]) 
+
+        if not chunk_data:
+            raise ValueError("Attempted to process an empty chunk.")
+        sstable_id = self._generate_sstable_id()
+        
+        if not self.sstable_manager.write_sstable(sstable_id, chunk_data):
+            raise IOError(f"Failed to write SSTable for chunk {sstable_id}.")
+
+        return sstable_id
     def _get_meta_file_path(self) -> str: 
         """Gets the path to the collection's metadata file."""
         return os.path.join(self.collection_path, self.ENGINE_META_FILE)
@@ -471,7 +484,128 @@ class LSMTreeStore(AbstractKVStore):
         else:
             raise IOError(f"CRITICAL: SSTable merge failed during L{level_idx} compaction.")
 
+
+    def _commit_sstables_and_meta(self, new_sstable_id: str, row_count: int, csv_metadata: Dict[str, Any]) -> None:
+        """
+        Atomically adds a newly created SSTable to L0, updates MANIFEST,
+        and updates the collection's core metadata with key count and CSV schema.
+        """
+        
+        #update levels and manifest
+        with self._level_lock:
+            if not self.levels:
+                self.levels.append([])
             
+            # Add to L0. The newest L0 sstables are at the end.
+            self.levels[0].append(new_sstable_id) 
+            
+            try:
+                self._write_manifest()
+            except IOError as e:
+                # Rollback: Remove ID from in-memory state if commit fails
+                self.levels[0].remove(new_sstable_id)
+                # CRITICAL: Delete the physical files to prevent orphaned data
+                self.sstable_manager.delete_sstable_files(new_sstable_id) 
+                raise IOError(f"CRITICAL: Failed to write MANIFEST after bulk SSTable creation. Import aborted. {e}")
+
+        # 2. Update Collection Metadata (Including new CSV Schema)
+        self._key_count += row_count
+        
+        meta_file_path = self._get_meta_file_path()
+        try:
+            with open(meta_file_path, 'r', encoding='utf-8') as f:
+                meta_data = json.load(f)
+            #update the kv pair count
+            meta_data["kv_pair_count"] = self._key_count
+            # Store the new, required CSV schema for export
+            meta_data["csv_schema"] = csv_metadata 
+            
+            with open(meta_file_path, 'w', encoding='utf-8') as f:
+                json.dump(meta_data, f, indent=2)
+                
+        except Exception as e:
+            print(f"Warning: Failed to update metadata file {meta_file_path} after successful import. Key count may be stale. {e}")
+    
+    def import_csv(
+    self, 
+    csv_file_path: str, 
+    key_columns: List[str], 
+    value_columns: List[str], 
+    csv_delimiter: str = ",",
+    key_separator: str = "\x00",
+    chunk_size: int = 100000 # Default to 100,000 rows as a memory heuristic
+) -> int:
+        
+        """Bulk imports a CSV file in chunks, creating multiple L0 SSTables if necessary."""
+    
+        if not os.path.exists(csv_file_path):
+            raise FileNotFoundError(f"CSV file not found at path: {csv_file_path}")
+
+        new_sstable_ids = []
+        total_rows_imported = 0
+        
+        # The try/except block encompasses the entire file reading and writing process 
+        # to ensure atomic rollback if any chunk fails.
+        try:
+            with open(csv_file_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile, delimiter=csv_delimiter)
+                
+                #column validation
+                required_cols = set(key_columns) | set(value_columns)
+                missing_cols = required_cols - set(reader.fieldnames)
+                if missing_cols:
+                    raise ValueError(f"CSV header missing required columns: {missing_cols}")
+                
+                current_chunk = []
+                
+                #go through each row for in memory chunking in case of large csv file
+                for row in reader:
+                    #Row formatting into kv piar
+                    key_parts = [row[col] for col in key_columns]
+                    key_string = key_separator.join(key_parts)
+                    value_dict = {col: row[col] for col in value_columns}
+                    value_binary = msgpack.packb(value_dict)
+                    current_chunk.append((key_string, value_binary))
+                    
+                    #check chunk size and flush if greater
+                    if len(current_chunk) >= chunk_size:
+                        # Write the chunk and track the new SSTable ID
+                        sstable_id = self._process_and_write_chunk(current_chunk)
+                        new_sstable_ids.append(sstable_id)
+                        total_rows_imported += len(current_chunk)
+                        
+                        # Reset the chunk for the next batch
+                        current_chunk = []
+                        
+                # final chunk processing
+                if current_chunk:
+                    sstable_id = self._process_and_write_chunk(current_chunk)
+                    new_sstable_ids.append(sstable_id)
+                    total_rows_imported += len(current_chunk)
+
+        except Exception as e:
+            # CRITICAL FAILURE HANDLING (Rollback)
+            # Delete any successfully written SSTables from this *attempt*
+            for sstable_id in new_sstable_ids:
+                self.sstable_manager.delete_sstable_files(sstable_id)
+            raise RuntimeError(f"Bulk CSV import failed during processing. Rolled back {len(new_sstable_ids)} SSTables. Error: {e}")
+            
+        #Commiting to manifest with metadata, useful for exporting
+        if new_sstable_ids:
+            csv_meta = {
+                "key_columns": key_columns,
+                "value_columns": value_columns,
+                "key_separator": key_separator
+            }
+            # Commit all new SSTable IDs and update collection metadata atomically
+            self._commit_sstables_and_meta(new_sstable_ids, total_rows_imported, csv_meta)
+            
+            # Trigger compaction check as multiple new L0 files may exceed the threshold (default 4)
+            if self._compaction_thread and self._compaction_thread.is_alive():
+                self._compaction_queue.put(("FLUSH_COMPLETE", 0))
+
+        return total_rows_imported
+
     def close(self) -> None:
         self.update_metadata()
         if self.memtable and len(self.memtable) > 0:

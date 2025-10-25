@@ -167,14 +167,14 @@ def main():
                 if not collections:
                     print("No collections found on disk.")
                 else:
-                    print("Available collections (name, type,description):")
+                    print("Available collections (name, type,description,CSV Schema):")
                     for collection_meta in collections:
                         name = collection_meta.get("name", "N/A")
                         type_ = collection_meta.get("type", "lsmtree")
                         # Safely retrieve the description
                         description = collection_meta.get("description", "No description provided")
-                        
-                        print(f"  - {name} ({type_}) | {description}")
+                        schema_status = "CSV Schema: Yes" if "csv_schema" in collection_meta else "CSV Schema: No"
+                        print(f"  - {name} ({type_}) | {description} | {schema_status}")
 
         elif command == "ACTIVE":
             if active_coll_name:
@@ -192,6 +192,21 @@ def main():
                     print(f"  Description: {meta_data.get('description', 'N/A')}")
                     print(f"  Date Created: {meta_data.get('date_created', 'N/A')}")
                     print(f"  Key-Value Pairs: {meta_data.get('kv_pair_count', 'N/A')}")
+                    csv_schema = meta_data.get("csv_schema")
+                    if csv_schema:
+                        print("\n--- CSV Schema Information ---")
+                        print(f"  Key Columns: {csv_schema.get('key_columns', 'N/A')}")
+                        print(f"  Value Columns: {csv_schema.get('value_columns', 'N/A')}")
+                        # Display the separator safely, avoiding printing the non-printable null character (\x00)
+                        separator = csv_schema.get('key_separator', 'N/A')
+                        if separator == "\x00":
+                            separator = "[Null Character: \\x00]"
+                        print(f"  Key Separator: {separator}")
+                        print("-----------------------------------------")
+                    else:
+                        print("\n--- CSV Schema Information ---")
+                        print("  No structured CSV schema information found.")
+                        print("-----------------------------------------")
                     print(f"  Configuration Options: {meta_data.get('options', 'N/A')}")
                     print("-----------------------------------------")
 
