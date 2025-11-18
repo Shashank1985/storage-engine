@@ -47,6 +47,7 @@ class LSMTreeStore(AbstractKVStore):
         
         self.levels: list[list[str]] = [] 
         self._level_lock = threading.Lock() # CRITICAL: Threading Lock for `self.levels` and `MANIFEST` file access
+        self._write_lock = threading.RLock()
 
         self._compaction_queue = queue.Queue()
         self._compaction_stop_event = threading.Event()
@@ -95,14 +96,15 @@ class LSMTreeStore(AbstractKVStore):
     def update_metadata(self) -> None:
         """Implements abstract method: reads, updates, and writes the key count."""
         meta_file_path = self._get_meta_file_path()
-        try:
-            with open(meta_file_path, 'r', encoding='utf-8') as f:
-                meta_data = json.load(f)
-            meta_data["kv_pair_count"] = self._key_count        
-            with open(meta_file_path, 'w', encoding='utf-8') as f:
-                json.dump(meta_data, f, indent=2)
-        except Exception as e:
-            print(f"Warning: Failed to update metadata file {meta_file_path}: {e}")
+        with self._write_lock:
+            try:
+                with open(meta_file_path, 'r', encoding='utf-8') as f:
+                    meta_data = json.load(f)
+                meta_data["kv_pair_count"] = self._key_count        
+                with open(meta_file_path, 'w', encoding='utf-8') as f:
+                    json.dump(meta_data, f, indent=2)
+            except Exception as e:
+                print(f"Warning: Failed to update metadata file {meta_file_path}: {e}")
 
     def _generate_sstable_id(self) -> str:
         return f"sst_{int(time.time() * 1000000)}_{len(self.sstable_manager.get_all_sstable_ids_from_disk())}"
@@ -168,34 +170,38 @@ class LSMTreeStore(AbstractKVStore):
     def put(self, key: str, value: str) -> None:
         if self.wal is None or self.memtable is None:
             raise RuntimeError("LSMTreeStore is not properly loaded")
-        exists_before_put = self.exists(key)
-        self.wal.log_operation("PUT", key, value)
-        self.memtable.put(key, value)
-        if not exists_before_put and value is not TOMBSTONE: 
-            self._key_count += 1
-        if self.memtable.is_full():
-            self._flush_memtable()
-            self.update_metadata()
+        
+        with self._write_lock: #acquire lock before put operation
+            exists_before_put = self.exists(key)
+            self.wal.log_operation("PUT", key, value)
+            self.memtable.put(key, value)
+            if not exists_before_put and value is not TOMBSTONE: 
+                self._key_count += 1
+            if self.memtable.is_full():
+                self._flush_memtable()
+                self.update_metadata()
 
     def delete(self, key: str) -> None:
         if self.wal is None or self.memtable is None:
             raise RuntimeError("LSMTreeStore not properly loaded. Call load() via StorageManager.")
 
-        exists_before_delete = self.exists(key) is not None
-        self.wal.log_operation("DELETE", key)
-        self.memtable.delete(key) # Uses TOMBSTONE internally
-        if exists_before_delete:
-            self._key_count = max(0, self._key_count - 1)
-        if self.memtable.is_full(): # Or other criteria for flushing after deletes
-            self._flush_memtable()
-            self.update_metadata()
+        with self._write_lock: #acquire lock before deleting
+            exists_before_delete = self.exists(key) is not None
+            self.wal.log_operation("DELETE", key)
+            self.memtable.delete(key) # Uses TOMBSTONE internally
+            if exists_before_delete:
+                self._key_count = max(0, self._key_count - 1)
+            if self.memtable.is_full(): # Or other criteria for flushing after deletes
+                self._flush_memtable()
+                self.update_metadata()
 
 
     def get(self, key: str) -> str | None:
         if self.memtable is None: # Check memtable existence as a proxy for loaded state
              raise RuntimeError("LSMTreeStore not properly loaded. Call load() via StorageManager.")
 
-        mem_value = self.memtable.get(key)
+        with self._write_lock:
+            mem_value = self.memtable.get(key)
         if mem_value is not None:
             return None if mem_value is TOMBSTONE else mem_value # Ensure TOMBSTONE object is used
 
@@ -223,17 +229,18 @@ class LSMTreeStore(AbstractKVStore):
         if self.memtable is None:
             return
             
+        with self._write_lock:
         # Find the starting index for the range in the sorted dict keys
-        start_idx = self.memtable._data.bisect_left(start_key) 
-        
-        for i in range(start_idx, len(self.memtable._data)):
-            key = self.memtable._data.iloc[i]
-            if key >= end_key:
-                break
-            value = self.memtable._data[key]
-            # Ensure internal TOMBSTONE object is yielded correctly as TOMBSTONE_VALUE string
-            value_to_yield = TOMBSTONE_VALUE if value is TOMBSTONE else value 
-            yield (key, value_to_yield)
+            start_idx = self.memtable._data.bisect_left(start_key) 
+            
+            for i in range(start_idx, len(self.memtable._data)):
+                key = self.memtable._data.iloc[i]
+                if key >= end_key:
+                    break
+                value = self.memtable._data[key]
+                # Ensure internal TOMBSTONE object is yielded correctly as TOMBSTONE_VALUE string
+                value_to_yield = TOMBSTONE_VALUE if value is TOMBSTONE else value 
+                yield (key, value_to_yield)
 
 
     def range_query(self, start_key: str, end_key: str) -> Iterator[Tuple[str, str]]:
@@ -520,21 +527,22 @@ class LSMTreeStore(AbstractKVStore):
                 raise IOError(f"CRITICAL: Failed to write MANIFEST after bulk SSTable creation. Import aborted. {e}")
 
         #update collection metadata with kv count and csv_schema
-        self._key_count += row_count
-        
-        meta_file_path = self._get_meta_file_path()
-        try:
-            with open(meta_file_path, 'r', encoding='utf-8') as f:
-                meta_data = json.load(f)
+        with self._write_lock:
+            self._key_count += row_count
             
-            meta_data["kv_pair_count"] = self._key_count
-            meta_data["csv_schema"] = csv_metadata 
-            
-            with open(meta_file_path, 'w', encoding='utf-8') as f:
-                json.dump(meta_data, f, indent=2)
+            meta_file_path = self._get_meta_file_path()
+            try:
+                with open(meta_file_path, 'r', encoding='utf-8') as f:
+                    meta_data = json.load(f)
                 
-        except Exception as e:
-            print(f"Warning: Failed to update metadata file {meta_file_path} after successful import. Key count may be stale. {e}")
+                meta_data["kv_pair_count"] = self._key_count
+                meta_data["csv_schema"] = csv_metadata 
+                
+                with open(meta_file_path, 'w', encoding='utf-8') as f:
+                    json.dump(meta_data, f, indent=2)
+                    
+            except Exception as e:
+                print(f"Warning: Failed to update metadata file {meta_file_path} after successful import. Key count may be stale. {e}")
 
 
     def import_csv(
@@ -641,9 +649,10 @@ class LSMTreeStore(AbstractKVStore):
 
     def close(self) -> None:
         self.update_metadata()
-        if self.memtable and len(self.memtable) > 0:
-            self._flush_memtable() # Ensure outstanding memtable data is flushed
-        
+        with self._write_lock:
+            if self.memtable and len(self.memtable) > 0:
+                self._flush_memtable() # Ensure outstanding memtable data is flushed
+            
         # NEW: Stop compaction thread gracefully
         if self._compaction_thread:
             self._compaction_stop_event.set()
