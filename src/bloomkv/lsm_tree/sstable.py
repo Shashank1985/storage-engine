@@ -5,6 +5,7 @@ import heapq
 import mmh3
 import msgpack
 from typing import Tuple,Iterator
+import math
 
 TOMBSTONE_VALUE = "__TOMBSTONE__" 
 
@@ -13,10 +14,10 @@ class BloomFilter:
     NUM_HASHES = 3     
 
     def __init__(self, bit_array=None):
-        if bit_array:
+        if bit_array is not None:
             self._bits = bit_array
         else:
-            self._bits = [False] * self.BITS_COUNT
+            self._bits = 0
 
     def _hash_funcs(self, key: str) -> list[int]:
         """
@@ -39,14 +40,14 @@ class BloomFilter:
     def add(self, key: str):
         """Adds a key to the filter."""
         for index in self._hash_funcs(key):
-            self._bits[index] = True
+            self._bits |= (1 << index)
 
     def check(self, key: str) -> bool:
         """Checks if a key might be present. Returns False if definitely not present."""
         for index in self._hash_funcs(key):
-            if not self._bits[index]:
-                return False # Definitely not present
-        return True # Might be present (False positive possible)
+            if not (self._bits & (1 << index)):
+                return False 
+        return True
 
     @classmethod
     def from_file(cls, bf_path: str):
@@ -55,19 +56,24 @@ class BloomFilter:
             return None 
             
         try:
-            with open(bf_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if len(data) == cls.BITS_COUNT:
-                    return cls(bit_array=data)
-                return None 
+            with open(bf_path, 'rb') as f:
+                num_bytes = math.ceil(cls.BITS_COUNT / 8)
+                bytes_data = f.read(num_bytes)
+                if not bytes_data:
+                    return None
+                bit_value = int.from_bytes(bytes_data, byteorder='big')
+                return cls(bit_array=bit_value)
         except (IOError, json.JSONDecodeError):
             return None
             
     def write_to_file(self, bf_path: str) -> bool:
         """Writes the Bloom Filter state to a file."""
         try:
-            with open(bf_path, 'w', encoding='utf-8') as f:
-                json.dump(self._bits, f)
+            with open(bf_path, 'wb') as f: # Write in binary mode
+                num_bytes = math.ceil(self.BITS_COUNT / 8)
+                # Convert integer to bytes
+                bytes_data = self._bits.to_bytes(num_bytes, byteorder='big')
+                f.write(bytes_data)
             return True
         except IOError:
             return False
@@ -121,8 +127,8 @@ class SSTableManager:
             
             # Write the sparse index
             if sparse_index_entries: # Only write if there's something to index
-                with open(index_path, 'w', encoding='utf-8') as index_f:
-                    json.dump(sparse_index_entries, index_f)
+                with open(index_path, 'wb') as index_f:
+                    index_f.write(msgpack.packb(sparse_index_entries))
             
             if entry_count > 0:
                 bloom_filter.write_to_file(bloom_path)
@@ -164,8 +170,8 @@ class SSTableManager:
         #use the sparse index first
         if os.path.exists(index_path):
             try:
-                with open(index_path, 'r', encoding='utf-8') as index_f:
-                    sparse_index_entries = json.load(index_f)
+                with open(index_path, 'rb') as index_f:
+                    sparse_index_entries = msgpack.unpack(index_f)
                 
                 if sparse_index_entries: 
                     # Extract just the keys for bisect, as bisect works on sorted lists.
@@ -216,8 +222,8 @@ class SSTableManager:
         #use sparse index first
         if os.path.exists(index_path):
             try:
-                with open(index_path, 'r', encoding='utf-8') as index_f:
-                    sparse_index_entries = json.load(index_f)
+                with open(index_path, 'rb') as index_f:
+                    sparse_index_entries = msgpack.unpack(index_f)
                 
                 if sparse_index_entries: 
                     index_keys = [entry["key"] for entry in sparse_index_entries]

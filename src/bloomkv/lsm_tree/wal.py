@@ -2,11 +2,11 @@
 Write Ahead Log (WAL) implementation. 
 This is a log stored in disk, records all the operations to the database, for persistance.
 It is used to recover the database in case of a crash or failure.
-It is a simple append-only log, where each line is a JSON object representing an operation.
+It is a simple append-only log, where each line was JSON, now it is moved to msgpack binary
 """
 
 import os
-import json
+import msgpack
 
 TOMBSTONE = "__TOMBSTONE__"
 
@@ -18,7 +18,7 @@ class WriteAheadLog:
         # Open in append mode, create if not exists.
         # The file handle has to be open.
         try:
-            self._file = open(self.wal_path, 'a', encoding='utf-8')
+            self._file = open(self.wal_path, 'ab')
         except IOError as e:
             raise IOError("Error opening the Write Ahead Log")
 
@@ -35,9 +35,10 @@ class WriteAheadLog:
             raise ValueError(f"Unknown operation type '{operation_type}' for WAL.")
        
         try:
-            json_entry = json.dumps(log_entry)
-            self._file.write(json_entry + '\n')
+            packed_entry = msgpack.packb(log_entry)
+            self._file.write(packed_entry)
             self._file.flush()  # Ensure it's written to disk immediately for persistence
+            os.fsync(self._file.fileno())
         except (IOError, TypeError) as e:
             raise IOError(f"Error writing to WAL {self.wal_path}: {e}")
 
@@ -57,26 +58,21 @@ class WriteAheadLog:
             self._file.close() # Close append mode file
 
         try:
-            with open(self.wal_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            entry = json.loads(line)
-                            entries.append(entry)
-                        except json.JSONDecodeError as e:
-                            continue
-        except IOError as e:
-            raise IOError(f"Error reading WAL file {self.wal_path} during replay: {e}")
+            with open(self.wal_path, 'rb') as f: # Read binary
+                unpacker = msgpack.Unpacker(f, raw=False)
+                for entry in unpacker:
+                    entries.append(entry)
+        except Exception as e:
+            # Handle possible corruption or empty files
+            print(f"Warning: WAL replay issue: {e}")
         finally:
             self._reopen_for_append()
-                
         return entries
 
     def _reopen_for_append(self):
         # Reopen in append mode
             try:
-                self._file = open(self.wal_path, 'a', encoding='utf-8')
+                self._file = open(self.wal_path, 'ab')
             except IOError as e:
                 raise IOError(f"Critical Error: Failed to reopen WAL {self.wal_path} for appending: {e}")
             
@@ -88,7 +84,7 @@ class WriteAheadLog:
             self._file.close()
         try:
             # Open in write mode to truncate, then immediately reopen in append mode
-            with open(self.wal_path, 'w', encoding='utf-8') as f:
+            with open(self.wal_path, 'wb') as f:
                 pass # Opening in 'w' mode truncates the file
             self._reopen_for_append()
         except IOError as e:
