@@ -5,24 +5,25 @@ This project is a simple **LSM-tree based implementation** of a key-value store 
 
 The core architecture is composed of the three fundamental components of an LSM-tree:
 1.  **Write Ahead Log (WAL)**: For atomicity and durability.
-2.  **In-memory Memtable**: Where all initial writes are buffered.
+2.  **In-memory Sharded Memtable**: An in-memory buffer partitioned into 16 shards to allow concurrent writes.
 3.  **SSTables (Sorted String Tables)**: Persistent storage where items are sorted by keys.
 
 ## Data Flow (Write Path)
 1.  A write request is received.
 2.  The operation is recorded in the **WAL** for crash recovery.
 3. The key-value pair is pushed to the bloom filter.
-4.  The key-value pair is pushed to the **Memtable** (a sorted container in memory).
-5.  Once the Memtable reaches a pre-defined **size threshold** (default 4MB), it is flushed into a new persistent SSTable in Level 0 (L0). The memtable flush is done in 2 cases:
-    * Upon closing of the active collection to which you are writing the pairs
-    * Memtable reaches a certain size threshold.
-6.  After the flush is complete, the WAL is truncated.
+4.  **Hashing**: The incoming key is hashed to determine its target Shard ID (0-15).
+5.  **Locking**: The thread acquires a lock specific to that shard (avoiding global contention).
+6.  **Logging**: The operation is recorded in the **WAL**.
+7.  **Buffering**: The key-value pair is written to the specific **Memtable Shard**.
+8.  **Flushing**: Once the total size of all shards reaches the threshold (default 4MB), the system locks all shards, merges the data, and writes a new **SSTable** to Level 0 (L0).
+9.  After the flush is complete, the WAL is truncated.
 
 ## Data Flow (Read Path)
 LSM-Trees are write-optimized, making the read path more complicated compared to B-Trees.
 
-1.  A read request first searches the **Memtable**.
-2.  The bloom filter is first queried for the required key. The search is conducted based on the bloom filter's return value, check docs/concepts/BloomFilter.md for internal working.
+1.  A read request first searches the **Memtable**. The read request hashes the key and checks the specific Memtable Shard.
+2.  **Bloom Filter**: If not in memory, the Bloom Filter (`.bf`) of each SSTable is queried.
 3.  If not found in the memtable and the bloom filter returns positive, the search continues to the **SSTables** across various levels. The search prioritizes newer data: L0 (newest to oldest), then L1, L2, and so on.
 4. **Using the Sparse Index**: For a given SSTable, the read request first checks the sparse index (`.idx` file) to find the nearest key that is less than or equal to the target key. This index entry provides the **byte offset** in the main data file (`.dat`), allowing the system to skip most of the file and begin scanning from the approximate location of the key, minimizing disk I/O.
 

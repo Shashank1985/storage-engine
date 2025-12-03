@@ -6,7 +6,7 @@ This project is an **LSM-tree based key-value storage engine** implemented in Py
 
 It is a persistent key-value store featuring:
 * A Write Ahead Log (WAL) for atomicity and durability.
-* An in-memory Memtable using `SortedDict`.
+* An in-memory Sharded Memtable using `SortedDict` for high consistency and availability.
 * Persistent Sorted String Tables (SSTables).
 * Asynchronous, leveled compaction handled by a background worker thread (introduced in v1.0.0).
 * Metadata generation for created collections
@@ -15,6 +15,7 @@ It is a persistent key-value store featuring:
 * Supports range queries from start_key to end_key
 * Can be used as an importable library for programmatic integration
 * Import csv files and store them as kv pairs in a collection
+* Dockerized server, published to docker hub
 
 ## Getting Started
 * Detailed documentation, usage and explanation of each component is available in the docs folder.
@@ -23,7 +24,7 @@ It is a persistent key-value store featuring:
 Contributions, issues and feature requests are welcome!
 **Contributing ideas**
 * Implement a proper testing suite for different components. Unit tests, Integration Tests
-* Thread safety for multi threaded programs
+* Immutable memtable pipelining, to prevent write blocking during memtable flushes.
 * UI features along with CLI and library utilisation. 
 and many more, ideas are always welcome!
 

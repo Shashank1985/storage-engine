@@ -41,3 +41,7 @@ Added a close command to close the active collection and use a new one, if by ac
 ## 25 Oct 2025, version 1.2.10
 * Provide feature to import csv files as key value pairs and store them in a collection
 * This import is multithreaded which uses ThreadPoolExecutor for concurrent writes
+
+## 3 Dec 2025, version 1.3.1
+* Move every storage file (sparse index, bloom filter) to binary format, metadata remains in json format
+* Migrate from simple memtable, to sharded memtable to get better consistency vs availability trade off.
