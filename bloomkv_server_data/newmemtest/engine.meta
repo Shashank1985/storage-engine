@@ -1,0 +1,8 @@
+{
+  "name": "newmemtest",
+  "type": "lsmtree",
+  "options": {},
+  "description": "\"new collection for testing sharded memtable\"",
+  "date_created": "2025-12-03T13:12:01.462260",
+  "kv_pair_count": 3
+}

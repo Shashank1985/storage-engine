@@ -536,7 +536,7 @@ class LSMTreeStore(AbstractKVStore):
                 raise IOError(f"CRITICAL: Failed to write MANIFEST after bulk SSTable creation. Import aborted. {e}")
 
         #update collection metadata with kv count and csv_schema
-        with self._write_lock:
+        with self._metadata_lock:
             self._key_count += row_count
             
             meta_file_path = self._get_meta_file_path()
@@ -658,11 +658,13 @@ class LSMTreeStore(AbstractKVStore):
 
     def close(self) -> None:
         self.update_metadata()
-        with self._write_lock:
-            if self.memtable and len(self.memtable) > 0:
-                self._flush_memtable() # Ensure outstanding memtable data is flushed
+        if self.memtable:
+             # We try to flush, but catch errors to ensure the rest of the close logic proceeds
+             try:
+                self._flush_memtable()
+             except Exception as e:
+                print(f"Warning: Error flushing memtable during close: {e}")
             
-        # NEW: Stop compaction thread gracefully
         if self._compaction_thread:
             self._compaction_stop_event.set()
             # Give the worker a chance to finish its current task or time out
