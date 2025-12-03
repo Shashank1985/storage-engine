@@ -269,24 +269,32 @@ def main():
             encoded_end = urllib.parse.quote(end_key, safe="")
             endpoint = f"/kv/range?start_key={encoded_start}&end_key={encoded_end}"
             
-            # The server streams the JSON response, so we need a special way to read it.
+            # The server streams the JSON response.
             try:
+                # FIX: We must read the response content INSIDE the 'with' block
+                full_json_text = ""
                 with HTTPX_CLIENT.stream("GET", endpoint) as response:
                     # Check for server error immediately
                     if response.is_error:
+                         # Read error detail safely inside the stream context
                          try:
-                            error_detail = response.json().get('detail', f"HTTP Error: {response.status_code}")
-                         except:
-                            error_detail = response.text.strip()
+                            error_body = response.read().decode('utf-8')
+                            try:
+                                error_json = json.loads(error_body)
+                                error_detail = error_json.get('detail', error_body)
+                            except json.JSONDecodeError:
+                                error_detail = error_body
+                         except Exception:
+                            error_detail = f"HTTP Error: {response.status_code}"
+                         
                          print(f"Server Error ({response.status_code}): {error_detail}")
                          continue
 
-                # Read and parse the streamed JSON
+                    # Read the entire stream into memory
+                    full_json_text = response.read().decode("utf-8")
+
+                # Parse the JSON after safely exiting the stream context
                 print(f"\n--- Range Query: ['{start_key}' to '{end_key}'] ---")
-                
-                # The response is streamed as a single JSON array, which requests treats as text chunks.
-                # We simply combine all chunks and try to parse the final JSON.
-                full_json_text = response.text
                 
                 try:
                     results = json.loads(full_json_text)
@@ -310,4 +318,3 @@ def main():
                 print(f"An unexpected client error occurred during RANGE query: {type(e).__name__}: {e}") 
         else:
             print(f"Unknown command: '{command}'. Type 'HELP' for available commands.")
-
