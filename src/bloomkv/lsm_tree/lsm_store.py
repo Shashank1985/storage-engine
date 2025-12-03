@@ -1,3 +1,4 @@
+import contextlib
 import os
 import time
 import json
@@ -12,7 +13,7 @@ import concurrent.futures
 
 from ..abstract_kv_store import AbstractKVStore
 from .wal import WriteAheadLog, TOMBSTONE 
-from .memtable import Memtable 
+from .memtable import ShardedMemtable
 from .sstable import SSTableManager, TOMBSTONE_VALUE 
 
 class LSMCompactionError(RuntimeError):
@@ -42,12 +43,13 @@ class LSMTreeStore(AbstractKVStore):
 
         # Initialize objects
         self.wal: WriteAheadLog | None = None
-        self.memtable: Memtable | None = None
+        self.memtable: ShardedMemtable | None = None
         self.sstable_manager: SSTableManager = SSTableManager(self.sstables_storage_dir)
         
         self.levels: list[list[str]] = [] 
         self._level_lock = threading.Lock() # CRITICAL: Threading Lock for `self.levels` and `MANIFEST` file access
-        self._write_lock = threading.RLock()
+        self._metadata_lock = threading.Lock()
+        self._flush_lock = threading.RLock()
 
         self._compaction_queue = queue.Queue()
         self._compaction_stop_event = threading.Event()
@@ -96,7 +98,7 @@ class LSMTreeStore(AbstractKVStore):
     def update_metadata(self) -> None:
         """Implements abstract method: reads, updates, and writes the key count."""
         meta_file_path = self._get_meta_file_path()
-        with self._write_lock:
+        with self._metadata_lock:
             try:
                 with open(meta_file_path, 'r', encoding='utf-8') as f:
                     meta_data = json.load(f)
@@ -143,7 +145,7 @@ class LSMTreeStore(AbstractKVStore):
     def load(self) -> None:
         self._load_manifest()
         self.wal = WriteAheadLog(self.wal_path)
-        self.memtable = Memtable(threshold_bytes=self.memtable_flush_threshold_bytes)
+        self.memtable = ShardedMemtable(threshold_bytes=self.memtable_flush_threshold_bytes)
         meta_file_path = self._get_meta_file_path()
         if os.path.exists(meta_file_path):
             try:
@@ -171,83 +173,111 @@ class LSMTreeStore(AbstractKVStore):
         if self.wal is None or self.memtable is None:
             raise RuntimeError("LSMTreeStore is not properly loaded")
         
-        with self._write_lock: #acquire lock before put operation
-            exists_before_put = self.exists(key)
+        shard_idx = self.memtable.get_shard_index(key)
+        with self.memtable.locks[shard_idx]:
+            exists_in_shard = self.memtable.shards[shard_idx].get(key)
+            if exists_in_shard is not None:
+                exists_before_put = (exists_in_shard != TOMBSTONE)
+            else:
+                exists_before_put = self._exists_on_disk(key)
+            
             self.wal.log_operation("PUT", key, value)
-            self.memtable.put(key, value)
+            self.memtable.put_to_shard(shard_idx, key, value)
             if not exists_before_put and value is not TOMBSTONE: 
-                self._key_count += 1
-            if self.memtable.is_full():
-                self._flush_memtable()
-                self.update_metadata()
+                with self._metadata_lock:
+                    self._key_count += 1
+        
+        if self.memtable.is_full():
+            self._flush_memtable()
+            self.update_metadata()
 
     def delete(self, key: str) -> None:
         if self.wal is None or self.memtable is None:
             raise RuntimeError("LSMTreeStore not properly loaded. Call load() via StorageManager.")
 
-        with self._write_lock: #acquire lock before deleting
-            exists_before_delete = self.exists(key) is not None
+        shard_idx = self.memtable.get_shard_index(key)
+        with self.memtable.locks[shard_idx]:
+            exists_in_shard = self.memtable.shards[shard_idx].get(key)
+            if exists_in_shard is not None:
+                exists_before_delete = (exists_in_shard != TOMBSTONE)
+            else:
+                exists_before_delete = self._exists_on_disk(key)
             self.wal.log_operation("DELETE", key)
-            self.memtable.delete(key) # Uses TOMBSTONE internally
+            self.memtable.put_to_shard(shard_idx, key, TOMBSTONE)
             if exists_before_delete:
-                self._key_count = max(0, self._key_count - 1)
-            if self.memtable.is_full(): # Or other criteria for flushing after deletes
-                self._flush_memtable()
-                self.update_metadata()
-
-
+                with self._metadata_lock:
+                    self._key_count = max(0, self._key_count - 1)
+        
+        if self.memtable.is_full():
+             self._flush_memtable()
+             self.update_metadata()
+    
+    def _exists_on_disk(self, key: str) -> bool:
+        """Helper to check existence only in SSTables (skipping memtable)."""
+        # Search SSTables
+        for level_idx, sstable_ids_in_level in enumerate(self.levels):
+            search_order = reversed(sstable_ids_in_level) if level_idx == 0 else sstable_ids_in_level
+            for sstable_id in search_order:
+                if not self.sstable_manager.check_bloom_filter(sstable_id, key):
+                    continue 
+                sstable_val, was_tombstone_str = self.sstable_manager.find_in_sstable(sstable_id, key)
+                if sstable_val is not None:
+                    return not was_tombstone_str
+        return False
+    
     def get(self, key: str) -> str | None:
         if self.memtable is None: # Check memtable existence as a proxy for loaded state
              raise RuntimeError("LSMTreeStore not properly loaded. Call load() via StorageManager.")
 
-        with self._write_lock:
-            mem_value = self.memtable.get(key)
+        mem_value = self.memtable.get(key) #hashes the key and gets lock on the right shard internally
         if mem_value is not None:
-            return None if mem_value is TOMBSTONE else mem_value # Ensure TOMBSTONE object is used
+            return None if mem_value is TOMBSTONE else mem_value
 
-        # Search SSTables: L0 (newest to oldest), then L1, L2...
         for level_idx, sstable_ids_in_level in enumerate(self.levels):
             search_order = reversed(sstable_ids_in_level) if level_idx == 0 else sstable_ids_in_level
             
             for sstable_id in search_order:
                 if not self.sstable_manager.check_bloom_filter(sstable_id, key):
                     continue 
-                # find_in_sstable returns (value, is_tombstone_found)
-                # value could be TOMBSTONE_VALUE (string) if is_tombstone_found is true
                 sstable_val, was_tombstone_str = self.sstable_manager.find_in_sstable(sstable_id, key)
                 
-                if sstable_val is not None: # Found an entry for the key
+                if sstable_val is not None: 
                     if was_tombstone_str or sstable_val == TOMBSTONE_VALUE:
-                        return None # Key is deleted
-                    return sstable_val # Return the actual value
+                        return None 
+                    return sstable_val
         return None
 
     def _memtable_range_iterator(self, start_key: str, end_key: str) -> Iterator[Tuple[str, str]]:
         """
-        Generates a range iterator for the Memtable [start_key, end_key].
+        Generates a range iterator for the Sharded Memtable [start_key, end_key].
+        Captures a consistent snapshot across all shards.
         """
         if self.memtable is None:
             return
+
+        # 1. Lock ALL shards to ensure we get a consistent "point-in-time" snapshot
+        with contextlib.ExitStack() as stack:
+            for lock in self.memtable.locks:
+                stack.enter_context(lock)
             
-        with self._write_lock:
-        # Find the starting index for the range in the sorted dict keys
-            start_idx = self.memtable._data.bisect_left(start_key) 
+            # 2. Merge sorted items from all shards into one list
+            # Note: This is efficient because it uses heapq.merge on already sorted shards
+            all_items = self.memtable.get_sorted_items()
+
+        for key, value in all_items:
+            if key >= end_key:
+                break
             
-            for i in range(start_idx, len(self.memtable._data)):
-                key = self.memtable._data.iloc[i]
-                if key >= end_key:
-                    break
-                value = self.memtable._data[key]
-                # Ensure internal TOMBSTONE object is yielded correctly as TOMBSTONE_VALUE string
+            if key >= start_key:
                 value_to_yield = TOMBSTONE_VALUE if value is TOMBSTONE else value 
                 yield (key, value_to_yield)
-
 
     def range_query(self, start_key: str, end_key: str) -> Iterator[Tuple[str, str]]:
         """
         Performs a k-way merge (Heap Merge Iterator) across all levels and the Memtable
         to return all key-value pairs in a sorted range [start_key, end_key], 
         ensuring only the newest version of each key is returned.
+
         """
         if self.memtable is None:
              raise RuntimeError("LSMTreeStore is not properly loaded")
@@ -255,80 +285,51 @@ class LSMTreeStore(AbstractKVStore):
         heap = []
         source_id_counter = 0 # Used to differentiate iterators; lower ID means newer source/level
 
-        # --- 1. Sources: Memtable (Source ID 0 - Newest) ---
-        # The value is the iterator object itself
-        memtable_it = self._memtable_range_iterator(start_key, end_key)
+        memtable_it = self._memtable_range_iterator(start_key,end_key)
         try:
             key, value = next(memtable_it)
-            # Heap entry structure: (key, source_id, value, iterator)
             heapq.heappush(heap, (key, source_id_counter, value, memtable_it))
         except StopIteration:
-            pass # Memtable is empty in this range
+            pass
         source_id_counter += 1
 
-        # --- 2. Sources: SSTables (Levels L0, L1, L2... L0 gets lower IDs) ---
-        
         with self._level_lock:
             for level_idx, sstable_ids_in_level in enumerate(self.levels):
-                # The source_id counter ensures that items from lower (newer) levels 
-                # are prioritized when keys are equal in the heap sort order.
                 for sstable_id in sstable_ids_in_level:
-                    # Optimization: Use metadata to check for key range overlap before opening file
                     range_info = self.sstable_manager.get_sstable_key_range(sstable_id)
                     if range_info:
                         meta_min, meta_max = range_info
-                        # Skip if requested range [start_key, end_key) does NOT overlap with SSTable [meta_min, meta_max]
-                        # Overlap occurs if (start_key < meta_max) AND (end_key > meta_min)
                         if start_key > meta_max or end_key <= meta_min:
                              continue
                     
-                    # Create the iterator for this SSTable
                     sstable_it = self.sstable_manager.range_iterator(sstable_id, start_key, end_key)
-                    
                     try:
                         key, value = next(sstable_it)
-                        # Push to heap. The `source_id_counter` is the version differentiator.
                         heapq.heappush(heap, (key, source_id_counter, value, sstable_it))
                         source_id_counter += 1
                     except StopIteration:
-                        # SSTable is empty in this range
                         continue
-
-        # --- 3. The Merge Loop (Version Resolution) ---
+        
         last_key = None
         latest_value = None
         
         while heap:
-            # key, source_id, value, iterator
             key, _, value, iterator = heapq.heappop(heap)
-
-            # If this is the first key in the whole process, or if the key is new:
             if key != last_key:
-                # If we finished processing the last key, yield the resolved value for it
                 if last_key is not None:
-                    # Yield the result for the last_key only if it wasn't a tombstone
                     if latest_value != TOMBSTONE_VALUE and latest_value is not None:
                         yield (last_key, latest_value)
-                
-                # Start tracking the new key
                 last_key = key
                 latest_value = value
-            # If key == last_key, we found an older version (because of the heap order). 
-            # We already have the newest version (the first one seen for this key), 
-            # so we simply ignore this entry and continue.
-
-            # Refill the heap from the iterator we just used
             try:
                 next_key, next_value = next(iterator)
                 heapq.heappush(heap, (next_key, source_id_counter, next_value, iterator))
             except StopIteration:
-                pass # This source is exhausted
+                pass
 
-        # --- 4. Final Key Yield ---
-        # Yield the very last key processed
         if last_key is not None and latest_value != TOMBSTONE_VALUE and latest_value is not None:
              yield (last_key, latest_value)
-
+        
     def exists(self, key: str) -> bool:
         return self.get(key) is not None
 
@@ -337,32 +338,40 @@ class LSMTreeStore(AbstractKVStore):
         if not self.memtable or not self.wal or len(self.memtable) == 0:
             return
 
-        sstable_id = self._generate_sstable_id()
-        sorted_items = sorted_items = [(k, v if v is not TOMBSTONE else TOMBSTONE_VALUE) 
-                        for k, v in self.memtable.get_sorted_items()]
-        
-        if self.sstable_manager.write_sstable(sstable_id, sorted_items):
-            
-            with self._level_lock: # Protect shared state modification
-                # Add to L0 (Level 0). L0 is self.levels[0]
-                if not self.levels: # First level (L0) doesn't exist
-                    self.levels.append([])
-                self.levels[0].append(sstable_id) # Append to L0, newest L0 sstables are at the end
+        with self._flush_lock: #obtain lock on all shards
+            with contextlib.ExitStack() as stack:
+                for lock in self.memtable.locks:
+                    stack.enter_context(lock)
+
+                if len(self.memtable) == 0:
+                    return 
+
+                sorted_items = [(k, v if v is not TOMBSTONE else TOMBSTONE_VALUE) 
+                                for k, v in self.memtable.get_sorted_items()]
                 
-                try:
-                    self._write_manifest()
-                except IOError as e:
-                    self.levels[0].remove(sstable_id)
-                    self.sstable_manager.delete_sstable_files(sstable_id)
-                    raise e
+                sstable_id = self._generate_sstable_id()
+                if self.sstable_manager.write_sstable(sstable_id, sorted_items):
+                    with self._level_lock:
+                        if not self.levels:
+                            self.levels.append([])
+                        self.levels[0].append(sstable_id)
+                        
+                        try:
+                            self._write_manifest()
+                        except IOError as e:
+                            self.levels[0].remove(sstable_id)
+                            self.sstable_manager.delete_sstable_files(sstable_id)
+                            raise e
+                    
+                    self.memtable.clear()
+                    self.wal.truncate()
 
-            self.memtable.clear()
-            self.wal.truncate()
-            if self._compaction_thread and self._compaction_thread.is_alive():
-                 self._compaction_queue.put(("FLUSH_COMPLETE", 0))
-        else:
-            raise IOError(f"CRITICAL: Failed to write SSTable {sstable_id} during memtable flush. Data remains in memtable/WAL.")
-
+                    if self._compaction_thread and self._compaction_thread.is_alive():
+                        self._compaction_queue.put(("FLUSH_COMPLETE", 0))
+                
+                else:
+                    raise IOError(f"CRITICAL: Failed to write SSTable {sstable_id}.")
+                
     def _compaction_worker_run(self):
         """Dedicated thread function for handling compaction tasks."""
         while not self._compaction_stop_event.is_set():
